@@ -8,7 +8,9 @@
     "start:clear": "expo start -c",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "postinstall": "node fix-assets.js",
+    "eas-build-post-install": "node fix-assets.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
