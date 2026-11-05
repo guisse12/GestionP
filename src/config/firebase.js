@@ -4,16 +4,16 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
-// Configuration Firebase pour l'application GPS Poulailler
-// Utilise des collections préfixées par "gps_" dans Firestore pour isoler proprement toutes les données du poulailler
+// Configuration Firebase dédiée à l'application GestionP
 const firebaseConfig = {
-  apiKey: "AIzaSyCwqZASk4uvCZCZidBLL3sobSEQkBxjLBo",
-  authDomain: "logeetudiant-3867e.firebaseapp.com",
-  databaseURL: "https://logeetudiant-3867e-default-rtdb.firebaseio.com",
-  projectId: "logeetudiant-3867e",
-  storageBucket: "logeetudiant-3867e.firebasestorage.app",
-  messagingSenderId: "729723154725",
-  appId: "1:729723154725:web:268de33c6676c4bd022acc"
+  apiKey: "AIzaSyCFT1dyMg-te8VLbQAL4v3mD8u2x0wAWWo",
+  authDomain: "gestionp-a2136.firebaseapp.com",
+  databaseURL: "https://gestionp-a2136-default-rtdb.firebaseio.com",
+  projectId: "gestionp-a2136",
+  storageBucket: "gestionp-a2136.firebasestorage.app",
+  messagingSenderId: "310658278876",
+  appId: "1:310658278876:web:c1e27574b26836ff28db19",
+  measurementId: "G-75MCB8CCNS"
 };
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
