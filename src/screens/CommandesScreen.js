@@ -22,19 +22,28 @@ import {
   deleteClientOrder,
   addFactureEntry,
   toggleFacturePaymentStatus,
+  updateBilanYellowBoxes,
 } from '../services/farmDataService';
 
 export default function CommandesScreen({ navigation }) {
+  const initS = getCachedSummary();
   const [user, setUser] = useState(() => getCachedUser());
   const [workbook, setWorkbook] = useState(() => getCachedWorkbook());
-  const [summary, setSummary] = useState(() => getCachedSummary());
+  const [summary, setSummary] = useState(() => initS);
   const [activeTab, setActiveTab] = useState('commandes');
   const [factureFilter, setFactureFilter] = useState('tous');
+
+  const [defaultPriceInput, setDefaultPriceInput] = useState(() =>
+    String(initS?.prixTabletteDefaut || 2200)
+  );
+  const [editingDefaultPrice, setEditingDefaultPrice] = useState(false);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [clientNom, setClientNom] = useState('');
   const [quantite, setQuantite] = useState('');
-  const [prixUnitaire, setPrixUnitaire] = useState('2200');
+  const [prixUnitaire, setPrixUnitaire] = useState(() =>
+    String(initS?.prixTabletteDefaut || 2200)
+  );
   const [numeroFacture, setNumeroFacture] = useState('');
   const [statutFacture, setStatutFacture] = useState('Payé');
 
@@ -48,7 +57,11 @@ export default function CommandesScreen({ navigation }) {
     setUser(u);
     const wb = await loadFarmWorkbook();
     setWorkbook(wb);
-    setSummary(computeFarmSummary(wb));
+    const s = computeFarmSummary(wb);
+    setSummary(s);
+    const defPrice = String(s.prixTabletteDefaut || 2200);
+    setDefaultPriceInput(defPrice);
+    setPrixUnitaire(defPrice);
   };
 
   useEffect(() => {
@@ -57,15 +70,33 @@ export default function CommandesScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
+  const handleSaveDefaultPrice = async () => {
+    const newPrice = Number(defaultPriceInput) || 2200;
+    const updated = await updateBilanYellowBoxes({ prixTabletteDefaut: newPrice });
+    const nextS = computeFarmSummary(updated);
+    setWorkbook(updated);
+    setSummary(nextS);
+    setPrixUnitaire(String(newPrice));
+    setEditingDefaultPrice(false);
+    Alert.alert('Tarif mis à jour', `Nouveau prix par défaut : ${formatFCFA(newPrice)} / tablette.`);
+  };
+
   const handleOrderStatus = async (cmd, newStatut) => {
     const updated = await updateOrderStatusByManager(cmd.id, newStatut);
+    if (updated?.insufficientStock) {
+      Alert.alert(
+        'Stock insuffisant',
+        `Cette commande demande ${cmd.quantiteTablettes} tablettes mais il n’y a que ${updated.availableStock} tablettes en stock.`
+      );
+      return;
+    }
     setWorkbook(updated);
     setSummary(computeFarmSummary(updated));
   };
 
   const handleCreateFacture = async () => {
     const qte = Number(quantite) || 0;
-    const pu = Number(prixUnitaire) || 2200;
+    const pu = Number(prixUnitaire) || s.prixTabletteDefaut || 2200;
     if (!clientNom.trim() || qte <= 0) {
       Alert.alert('Champs requis', 'Veuillez saisir le client et la quantité.');
       return;
@@ -78,7 +109,17 @@ export default function CommandesScreen({ navigation }) {
       prixUnitaire: pu,
       client: clientNom.trim(),
       statut: statutFacture,
+      deductStock: true,
+      auteur: user?.nom || user?.role || '',
     });
+
+    if (updated?.insufficientStock) {
+      Alert.alert(
+        'Stock insuffisant',
+        `Impossible de facturer ${qte} tablettes : il ne reste que ${updated.availableStock} tablettes en stock.`
+      );
+      return;
+    }
 
     setWorkbook(updated);
     setSummary(computeFarmSummary(updated));
@@ -157,6 +198,37 @@ export default function CommandesScreen({ navigation }) {
               {formatFCFA(s.totalVentesNonPayees)}
             </Text>
           </View>
+        </View>
+
+        {/* Bandeau de modification rapide du prix de la tablette */}
+        <View style={styles.priceConfigBar}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+            <Ionicons name="pricetag" size={18} color="#92400E" />
+            <Text style={styles.priceConfigLabel}>
+              Prix Tablette : <Text style={{ fontWeight: '900' }}>{formatFCFA(s.prixTabletteDefaut || 2200)}</Text>
+            </Text>
+          </View>
+          {editingDefaultPrice ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <TextInput
+                style={styles.priceQuickInput}
+                keyboardType="numeric"
+                value={defaultPriceInput}
+                onChangeText={setDefaultPriceInput}
+              />
+              <TouchableOpacity style={styles.priceSaveBtn} onPress={handleSaveDefaultPrice}>
+                <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.priceEditPill}
+              onPress={() => setEditingDefaultPrice(true)}
+            >
+              <Ionicons name="create-outline" size={15} color="#78350F" />
+              <Text style={styles.priceEditPillText}>Changer le prix</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {activeTab === 'commandes' ? (
@@ -705,5 +777,58 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '800',
+  },
+  priceConfigBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1.5,
+    borderColor: '#F59E0B',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 14,
+  },
+  priceConfigLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#78350F',
+  },
+  priceEditPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FDE68A',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#D97706',
+  },
+  priceEditPillText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#78350F',
+  },
+  priceQuickInput: {
+    width: 85,
+    height: 36,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#D97706',
+    borderRadius: 9,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#78350F',
+  },
+  priceSaveBtn: {
+    backgroundColor: COLORS.secondary,
+    width: 36,
+    height: 36,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

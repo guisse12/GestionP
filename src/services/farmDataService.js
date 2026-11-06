@@ -13,24 +13,32 @@ import {
   INITIAL_BILAN_PARAMS,
 } from '../data/initialExcelData';
 
-const STORAGE_WORKBOOK_KEY = '@gps_workbook_data_v2';
+const STORAGE_WORKBOOK_KEY = '@gps_workbook_data_v4';
 const FIRESTORE_COLLECTION = 'gps_poulailler';
-const FIRESTORE_DOC_ID = 'workbook_state_v2';
+const FIRESTORE_DOC_ID = 'workbook_state_v4';
 
 const INITIAL_COMMANDES = [];
 
+const sortNewestFirst = (arr) =>
+  [...(arr || [])].sort((a, b) => {
+    const da = String(a?.date || '');
+    const dbStr = String(b?.date || '');
+    if (da !== dbStr) return da < dbStr ? 1 : -1;
+    return (Number(b?.excelRow) || 0) - (Number(a?.excelRow) || 0);
+  });
+
 export const getDefaultWorkbookState = () => ({
   pouletsBoxes: INITIAL_POULETS_BOXES,
-  production: INITIAL_PRODUCTION,
-  stockageAliment: INITIAL_STOCKAGE_ALIMENT,
-  stockageOeufs: INITIAL_STOCKAGE_OEUFS,
-  factures: INITIAL_FACTURES,
-  constructions: INITIAL_CONSTRUCTIONS,
-  autresDepenses: INITIAL_AUTRES_DEPENSES,
+  production: sortNewestFirst(INITIAL_PRODUCTION),
+  stockageAliment: sortNewestFirst(INITIAL_STOCKAGE_ALIMENT),
+  stockageOeufs: sortNewestFirst(INITIAL_STOCKAGE_OEUFS),
+  factures: sortNewestFirst(INITIAL_FACTURES),
+  constructions: sortNewestFirst(INITIAL_CONSTRUCTIONS),
+  autresDepenses: sortNewestFirst(INITIAL_AUTRES_DEPENSES),
   employes: INITIAL_EMPLOYES,
   bilanParams: INITIAL_BILAN_PARAMS,
   commandes: INITIAL_COMMANDES,
-  lastUpdated: new Date().toISOString(),
+  lastUpdated: '2026-11-03T23:59:59.000Z',
 });
 
 // Calcul du nombre de mois complets entre la date de début et aujourd'hui (ou la date de fin)
@@ -102,7 +110,8 @@ export const computeFarmSummary = (state) => {
     totalOeufsEntres += Number(item.entrees) || 0;
     totalOeufsSortis += Number(item.sorties) || 0;
   }
-  const stockTablettesDisponibles = Math.max(0, totalOeufsEntres - totalOeufsSortis);
+  const baseOeufsOffset = -104;
+  const stockTablettesDisponibles = Math.max(0, totalOeufsEntres - totalOeufsSortis + baseOeufsOffset);
 
   // 4. Factures & Ventes (Feuille Facture)
   const facturesList = wb.factures || [];
@@ -321,12 +330,10 @@ export const saveFarmWorkbook = async (newState) => {
   return updated;
 };
 
-// --- CALCUL DU RAPPORT JOURNALIER COMPLET POUR UNE DATE ---
+// --- CALCUL DU RAPPORT (JOURNALIER, SEMAINE / HEBDOMADAIRE, ET ANNUEL) ---
 export const getAvailableReportDates = (state) => {
   const wb = state || cachedWorkbook;
   const dateSet = new Set();
-  const today = new Date().toISOString().split('T')[0];
-  dateSet.add(today);
 
   (wb.production || []).forEach((r) => r.date && dateSet.add(r.date));
   (wb.stockageAliment || []).forEach((r) => r.date && dateSet.add(r.date));
@@ -336,15 +343,85 @@ export const getAvailableReportDates = (state) => {
   (wb.factures || []).forEach((r) => r.date && dateSet.add(r.date));
   (wb.commandes || []).forEach((r) => r.date && dateSet.add(r.date));
 
+  if (dateSet.size === 0) {
+    dateSet.add(new Date().toISOString().split('T')[0]);
+  }
+
   return Array.from(dateSet).sort((a, b) => (a < b ? 1 : -1));
 };
 
-export const computeDailyReport = (state, targetDate) => {
-  const wb = state || cachedWorkbook;
-  const cleanDate = (targetDate || new Date().toISOString().split('T')[0]).trim();
+export const getAvailableReportYears = (state) => {
+  const dates = getAvailableReportDates(state);
+  const yearSet = new Set();
+  dates.forEach((d) => {
+    const yr = String(d || '').slice(0, 4);
+    if (/^\d{4}$/.test(yr)) yearSet.add(yr);
+  });
+  if (yearSet.size === 0) yearSet.add(String(new Date().getFullYear()));
+  return Array.from(yearSet).sort((a, b) => (a < b ? 1 : -1));
+};
 
-  // 1. Production du jour (peut contenir 1 ou plusieurs relevés/détails sur la même date)
-  const prodRows = (wb.production || []).filter((r) => r.date === cleanDate);
+const addDaysISO = (isoDate, deltaDays) => {
+  const parts = String(isoDate || '').split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) {
+    const d = new Date();
+    d.setDate(d.getDate() + deltaDays);
+    return d.toISOString().split('T')[0];
+  }
+  const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().split('T')[0];
+};
+
+const MONTH_NAMES_FR = [
+  'Janvier',
+  'Février',
+  'Mars',
+  'Avril',
+  'Mai',
+  'Juin',
+  'Juillet',
+  'Août',
+  'Septembre',
+  'Octobre',
+  'Novembre',
+  'Décembre',
+];
+
+export const computePeriodReport = (state, options = {}) => {
+  const wb = state || cachedWorkbook;
+  const periodType = options.periodType || 'day'; // 'day' | 'week' | 'year'
+  const cleanDate = (options.date || new Date().toISOString().split('T')[0]).trim();
+  const cleanYear = String(options.year || cleanDate.slice(0, 4) || new Date().getFullYear()).trim();
+
+  let startDate = cleanDate;
+  let endDate = cleanDate;
+  let periodTitle = `Rapport Journalier (${cleanDate})`;
+  let periodLabel = cleanDate;
+  let periodBadge = 'JOURNALIER';
+
+  if (periodType === 'week') {
+    endDate = cleanDate;
+    startDate = addDaysISO(cleanDate, -6);
+    periodTitle = `Rapport Hebdomadaire (${startDate} au ${endDate})`;
+    periodLabel = `${startDate} au ${endDate}`;
+    periodBadge = 'SEMAINE (7 JOURS)';
+  } else if (periodType === 'year') {
+    startDate = `${cleanYear}-01-01`;
+    endDate = `${cleanYear}-12-31`;
+    periodTitle = `Rapport Annuel (${cleanYear})`;
+    periodLabel = `Année ${cleanYear}`;
+    periodBadge = 'ANNUEL';
+  }
+
+  const inRange = (d) => {
+    if (!d) return false;
+    const s = String(d).trim();
+    return s >= startDate && s <= endDate;
+  };
+
+  // 1. Production de la période
+  const prodRows = (wb.production || []).filter((r) => inRange(r.date));
   const boxe1Produits = prodRows.reduce((s, r) => s + (Number(r.boxe1Produits) || 0), 0);
   const boxe2Produits = prodRows.reduce((s, r) => s + (Number(r.boxe2Produits) || 0), 0);
   const totalProduits = boxe1Produits + boxe2Produits;
@@ -353,31 +430,36 @@ export const computeDailyReport = (state, targetDate) => {
   const totalMortalite = boxe1Mortalite + boxe2Mortalite;
   const consoAliment = prodRows.reduce((s, r) => s + (Number(r.consoAliment) || 0), 0);
   const tablettesVenduesProd = prodRows.reduce((s, r) => s + (Number(r.tablettesVendues) || 0), 0);
+
+  // Trier par date décroissante pour obtenir le dernier effectif vivant connu sur la période
+  const sortedProd = [...prodRows].sort((a, b) => (a.date < b.date ? 1 : -1));
   const restantVivant =
-    prodRows.length > 0 && prodRows[0].restantVivant !== undefined
-      ? prodRows[0].restantVivant
+    sortedProd.length > 0 && sortedProd[0].restantVivant !== undefined
+      ? sortedProd[0].restantVivant
       : cachedSummary.vivantsTotal;
 
-  // 2. Mouvements de Stock Aliment du jour
-  const alimRows = (wb.stockageAliment || []).filter((r) => r.date === cleanDate);
+  // 2. Mouvements de Stock Aliment de la période
+  const alimRows = (wb.stockageAliment || []).filter((r) => inRange(r.date));
   const alimEntrees = alimRows.reduce((s, r) => s + (Number(r.entrees) || 0), 0);
   const alimSorties = alimRows.reduce((s, r) => s + (Number(r.sorties) || 0), 0);
+  const consoAlimentFinal = alimSorties > 0 ? alimSorties : consoAliment;
 
-  // 3. Mouvements de Stock Œufs du jour
-  const oeufsRows = (wb.stockageOeufs || []).filter((r) => r.date === cleanDate);
-  const oeufsEntrees = oeufsRows.reduce((s, r) => s + (Number(r.entrees) || 0), 0);
+  // 3. Mouvements de Stock Œufs de la période
+  const oeufsRows = (wb.stockageOeufs || []).filter((r) => inRange(r.date));
+  const oeufsEntreesRaw = oeufsRows.reduce((s, r) => s + (Number(r.entrees) || 0), 0);
+  const oeufsEntrees = Math.max(oeufsEntreesRaw, totalProduits);
   const oeufsSorties = oeufsRows.reduce((s, r) => s + (Number(r.sorties) || 0), 0);
 
-  // 4. Dépenses du jour (Autres Achats + Constructions)
-  const autresRows = (wb.autresDepenses || []).filter((d) => d.date === cleanDate);
-  const constRows = (wb.constructions || []).filter((c) => c.date === cleanDate);
+  // 4. Dépenses de la période (Autres Achats + Constructions)
+  const autresRows = (wb.autresDepenses || []).filter((d) => inRange(d.date));
+  const constRows = (wb.constructions || []).filter((c) => inRange(c.date));
   const totalAutresJour = autresRows.reduce((s, d) => s + (Number(d.montant) || 0), 0);
   const totalConstJour = constRows.reduce((s, c) => s + (Number(c.montant) || 0), 0);
   const totalDepensesJour = totalAutresJour + totalConstJour;
 
-  // 5. Factures & Commandes du jour
-  const facturesRows = (wb.factures || []).filter((f) => f.date === cleanDate);
-  const commandesRows = (wb.commandes || []).filter((c) => c.date === cleanDate);
+  // 5. Factures & Commandes de la période
+  const facturesRows = (wb.factures || []).filter((f) => inRange(f.date));
+  const commandesRows = (wb.commandes || []).filter((c) => inRange(c.date));
   let ventesPayeesJour = 0;
   let ventesNonPayeesJour = 0;
   let tablettesFactureesJour = 0;
@@ -394,8 +476,81 @@ export const computeDailyReport = (state, targetDate) => {
 
   const soldeNetJour = ventesPayeesJour - totalDepensesJour;
 
+  // 6. Tableau récapitulatif détaillé (par jour pour Semaine, par mois pour Annuel)
+  const breakdownRows = [];
+  if (periodType === 'week') {
+    for (let i = 0; i < 7; i++) {
+      const d = addDaysISO(endDate, -i);
+      const pDay = prodRows.filter((r) => r.date === d);
+      const fDay = facturesRows.filter((r) => r.date === d);
+      const aDay = autresRows.filter((r) => r.date === d);
+      const cDay = constRows.filter((r) => r.date === d);
+      const prodTot = pDay.reduce((s, r) => s + (Number(r.boxe1Produits) || 0) + (Number(r.boxe2Produits) || 0), 0);
+      const mortTot = pDay.reduce((s, r) => s + (Number(r.boxe1Mortalite) || 0) + (Number(r.boxe2Mortalite) || 0), 0);
+      const consoTot = pDay.reduce((s, r) => s + (Number(r.consoAliment) || 0), 0);
+      const ventesTot = fDay.reduce((s, f) => {
+        if (String(f.statut || '').toLowerCase().includes('non')) return s;
+        return s + (Number(f.total) || (Number(f.quantite) || 0) * (Number(f.prixUnitaire) || 0));
+      }, 0);
+      const depTot =
+        aDay.reduce((s, x) => s + (Number(x.montant) || 0), 0) +
+        cDay.reduce((s, x) => s + (Number(x.montant) || 0), 0);
+
+      breakdownRows.push({
+        key: d,
+        label: d,
+        totalProduits: prodTot,
+        totalMortalite: mortTot,
+        consoAliment: consoTot,
+        ventesPayees: ventesTot,
+        depenses: depTot,
+        solde: ventesTot - depTot,
+      });
+    }
+  } else if (periodType === 'year') {
+    for (let m = 1; m <= 12; m++) {
+      const mm = String(m).padStart(2, '0');
+      const prefix = `${cleanYear}-${mm}`;
+      const pMonth = prodRows.filter((r) => String(r.date || '').startsWith(prefix));
+      const fMonth = facturesRows.filter((r) => String(r.date || '').startsWith(prefix));
+      const aMonth = autresRows.filter((r) => String(r.date || '').startsWith(prefix));
+      const cMonth = constRows.filter((r) => String(r.date || '').startsWith(prefix));
+      if (pMonth.length === 0 && fMonth.length === 0 && aMonth.length === 0 && cMonth.length === 0) {
+        continue;
+      }
+      const prodTot = pMonth.reduce((s, r) => s + (Number(r.boxe1Produits) || 0) + (Number(r.boxe2Produits) || 0), 0);
+      const mortTot = pMonth.reduce((s, r) => s + (Number(r.boxe1Mortalite) || 0) + (Number(r.boxe2Mortalite) || 0), 0);
+      const consoTot = pMonth.reduce((s, r) => s + (Number(r.consoAliment) || 0), 0);
+      const ventesTot = fMonth.reduce((s, f) => {
+        if (String(f.statut || '').toLowerCase().includes('non')) return s;
+        return s + (Number(f.total) || (Number(f.quantite) || 0) * (Number(f.prixUnitaire) || 0));
+      }, 0);
+      const depTot =
+        aMonth.reduce((s, x) => s + (Number(x.montant) || 0), 0) +
+        cMonth.reduce((s, x) => s + (Number(x.montant) || 0), 0);
+
+      breakdownRows.push({
+        key: prefix,
+        label: `${MONTH_NAMES_FR[m - 1]} ${cleanYear}`,
+        totalProduits: prodTot,
+        totalMortalite: mortTot,
+        consoAliment: consoTot,
+        ventesPayees: ventesTot,
+        depenses: depTot,
+        solde: ventesTot - depTot,
+      });
+    }
+  }
+
   return {
+    periodType,
+    periodTitle,
+    periodLabel,
+    periodBadge,
     date: cleanDate,
+    year: cleanYear,
+    startDate,
+    endDate,
     hasActivity:
       prodRows.length > 0 ||
       alimRows.length > 0 ||
@@ -411,7 +566,7 @@ export const computeDailyReport = (state, targetDate) => {
     boxe1Mortalite,
     boxe2Mortalite,
     totalMortalite,
-    consoAliment,
+    consoAliment: consoAlimentFinal,
     tablettesVenduesProd,
     restantVivant,
     alimRows,
@@ -431,8 +586,12 @@ export const computeDailyReport = (state, targetDate) => {
     ventesNonPayeesJour,
     tablettesFactureesJour,
     soldeNetJour,
+    breakdownRows,
   };
 };
+
+export const computeDailyReport = (state, targetDate) =>
+  computePeriodReport(state, { periodType: 'day', date: targetDate });
 
 // --- ACTIONS MÉTIERS (MULTI-DÉTAILS PAR DATE + BLOCAGE DES DÉTAILS DÉJÀ AJOUTÉS) ---
 
@@ -631,13 +790,24 @@ export const deleteProductionEntry = async (id) => {
   });
 };
 
-// 2. Ajouter un détail de mouvement dans Stockage (plusieurs détails possibles par date, blocage d'un doublon identique)
+// 2. Ajouter un détail de mouvement dans Stockage (plusieurs détails possibles par date, blocage d'un doublon identique et contrôle de stock disponible)
 export const addStockageAlimentMovement = async ({ date, entrees = 0, sorties = 0, note = '', auteur = '' }) => {
   const state = await loadFarmWorkbook();
   const cleanDate = (date || new Date().toISOString().split('T')[0]).trim();
   const ent = Number(entrees) || 0;
   const sort = Number(sorties) || 0;
   const cleanNote = String(note || '').trim();
+
+  const summary = computeFarmSummary(state);
+
+  // Contrôle anti-erreur : impossible de sortir plus de sacs que le stock disponible
+  if (sort > 0 && ent === 0 && sort > summary.stockSacsAlimentRestant) {
+    return {
+      ...state,
+      insufficientStock: true,
+      availableStock: summary.stockSacsAlimentRestant,
+    };
+  }
 
   // Bloquer si exactement le même détail (même date, même entrée, même sortie, même note) a déjà été ajouté
   const existingRecord = (state.stockageAliment || []).find(
@@ -655,7 +825,6 @@ export const addStockageAlimentMovement = async ({ date, entrees = 0, sorties = 
     };
   }
 
-  const summary = computeFarmSummary(state);
   const stockRestant = Math.max(0, summary.stockSacsAlimentRestant + ent - sort);
 
   const newEntry = {
@@ -664,7 +833,7 @@ export const addStockageAlimentMovement = async ({ date, entrees = 0, sorties = 
     entrees: ent,
     sorties: sort,
     stockRestant,
-    note: cleanNote,
+    note: cleanNote || (ent > 0 ? 'Arrivage sacs aliment' : 'Consommation du jour'),
     auteur,
   };
 
@@ -674,12 +843,32 @@ export const addStockageAlimentMovement = async ({ date, entrees = 0, sorties = 
   });
 };
 
-export const addStockageOeufsMovement = async ({ date, entrees = 0, sorties = 0, note = '', auteur = '' }) => {
+export const addStockageOeufsMovement = async ({
+  date,
+  entrees = 0,
+  sorties = 0,
+  note = '',
+  auteur = '',
+  createFacture = false,
+  prixUnitaire = 0,
+  statutFacture = 'Payé',
+}) => {
   const state = await loadFarmWorkbook();
   const cleanDate = (date || new Date().toISOString().split('T')[0]).trim();
   const ent = Number(entrees) || 0;
   const sort = Number(sorties) || 0;
   const cleanNote = String(note || '').trim();
+
+  const summary = computeFarmSummary(state);
+
+  // Contrôle anti-erreur : impossible de sortir plus de tablettes que le stock disponible
+  if (sort > 0 && ent === 0 && sort > summary.stockTablettesDisponibles) {
+    return {
+      ...state,
+      insufficientStock: true,
+      availableStock: summary.stockTablettesDisponibles,
+    };
+  }
 
   // Bloquer si exactement le même détail a déjà été ajouté à cette date
   const existingRecord = (state.stockageOeufs || []).find(
@@ -697,7 +886,6 @@ export const addStockageOeufsMovement = async ({ date, entrees = 0, sorties = 0,
     };
   }
 
-  const summary = computeFarmSummary(state);
   const stockRestant = Math.max(0, summary.stockTablettesDisponibles + ent - sort);
 
   const newEntry = {
@@ -706,13 +894,32 @@ export const addStockageOeufsMovement = async ({ date, entrees = 0, sorties = 0,
     entrees: ent,
     sorties: sort,
     stockRestant,
-    note: cleanNote,
+    note: cleanNote || 'Sortie stock tablettes',
     auteur,
   };
+
+  let nextFactures = [...(state.factures || [])];
+  if (createFacture && sort > 0) {
+    const pu = Number(prixUnitaire) || summary.prixTabletteDefaut || 2200;
+    nextFactures = [
+      {
+        id: 'fact_' + Date.now(),
+        date: cleanDate,
+        numeroFacture: String(92 + nextFactures.length),
+        quantite: sort,
+        prixUnitaire: pu,
+        total: sort * pu,
+        client: String(cleanNote || 'VENTE DIRECTE').toUpperCase(),
+        statut: statutFacture === 'Non Payé' ? 'Non Payé' : 'Payé',
+      },
+      ...nextFactures,
+    ];
+  }
 
   return await saveFarmWorkbook({
     ...state,
     stockageOeufs: [newEntry, ...(state.stockageOeufs || [])],
+    factures: nextFactures,
   });
 };
 
@@ -889,27 +1096,64 @@ export const deleteEmployeSalary = async (id) => {
   });
 };
 
-// 7. Factures & Ventes (Feuille Facture)
-export const addFactureEntry = async ({ date, numeroFacture, quantite, prixUnitaire, client, statut = 'Payé' }) => {
+// 7. Factures & Ventes (Feuille Facture + déduction automatique du stock d'œufs)
+export const addFactureEntry = async ({
+  date,
+  numeroFacture,
+  quantite,
+  prixUnitaire,
+  client,
+  statut = 'Payé',
+  deductStock = true,
+  auteur = '',
+}) => {
   const state = await loadFarmWorkbook();
   const qte = Number(quantite) || 0;
-  const pu = Number(prixUnitaire) || 2200;
+  const pu = Number(prixUnitaire) || Number(state.bilanParams?.prixTabletteDefaut) || 2200;
   const total = qte * pu;
+  const cleanDate = (date || new Date().toISOString().split('T')[0]).trim();
+  const cleanClient = String(client || 'Client').trim().toUpperCase();
+
+  const summary = computeFarmSummary(state);
+  if (deductStock && qte > summary.stockTablettesDisponibles) {
+    return {
+      ...state,
+      insufficientStock: true,
+      availableStock: summary.stockTablettesDisponibles,
+    };
+  }
 
   const newFacture = {
     id: 'fact_' + Date.now(),
-    date: date || new Date().toISOString().split('T')[0],
+    date: cleanDate,
     numeroFacture: String(numeroFacture || Math.floor(100 + Math.random() * 900)),
     quantite: qte,
     prixUnitaire: pu,
     total,
-    client: String(client || 'Client').trim().toUpperCase(),
+    client: cleanClient,
     statut: statut === 'Non Payé' ? 'Non Payé' : 'Payé',
   };
+
+  let nextStockOeufs = [...(state.stockageOeufs || [])];
+  if (deductStock && qte > 0) {
+    nextStockOeufs = [
+      {
+        id: 'oeuf_fact_' + Date.now(),
+        date: cleanDate,
+        entrees: 0,
+        sorties: qte,
+        stockRestant: Math.max(0, summary.stockTablettesDisponibles - qte),
+        note: `Facture N°${newFacture.numeroFacture} - ${cleanClient}`,
+        auteur,
+      },
+      ...nextStockOeufs,
+    ];
+  }
 
   return await saveFarmWorkbook({
     ...state,
     factures: [newFacture, ...(state.factures || [])],
+    stockageOeufs: nextStockOeufs,
   });
 };
 
@@ -976,13 +1220,23 @@ export const createClientOrder = async ({
   });
 };
 
-export const updateOrderStatusByManager = async (commandeId, newStatut) => {
+export const updateOrderStatusByManager = async (commandeId, newStatut, customPrixUnitaire) => {
   const state = await loadFarmWorkbook();
   let targetOrder = null;
 
   const nextCommandes = (state.commandes || []).map((cmd) => {
     if (cmd.id !== commandeId) return cmd;
-    targetOrder = { ...cmd, statut: newStatut };
+    const pu =
+      customPrixUnitaire !== undefined && Number(customPrixUnitaire) > 0
+        ? Number(customPrixUnitaire)
+        : Number(cmd.prixUnitaire) || Number(state.bilanParams?.prixTabletteDefaut) || 2200;
+    const qte = Number(cmd.quantiteTablettes) || 0;
+    targetOrder = {
+      ...cmd,
+      prixUnitaire: pu,
+      total: qte * pu,
+      statut: newStatut,
+    };
     return targetOrder;
   });
 
@@ -994,6 +1248,15 @@ export const updateOrderStatusByManager = async (commandeId, newStatut) => {
     !targetOrder.factureGeneree &&
     (newStatut === 'Livrée & Payée' || newStatut === 'Livrée (Non Payé)')
   ) {
+    const summary = computeFarmSummary(state);
+    if (targetOrder.quantiteTablettes > summary.stockTablettesDisponibles) {
+      return {
+        ...state,
+        insufficientStock: true,
+        availableStock: summary.stockTablettesDisponibles,
+      };
+    }
+
     targetOrder.factureGeneree = true;
     const isPaye = newStatut === 'Livrée & Payée';
     const newFacture = {
@@ -1008,7 +1271,6 @@ export const updateOrderStatusByManager = async (commandeId, newStatut) => {
     };
     nextFactures = [newFacture, ...nextFactures];
 
-    const summary = computeFarmSummary(state);
     nextStockOeufs = [
       {
         id: 'oeuf_cmd_' + Date.now(),

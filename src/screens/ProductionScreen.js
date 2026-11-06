@@ -35,9 +35,6 @@ export default function ProductionScreen({ navigation }) {
   const [boxe2Prod, setBoxe2Prod] = useState('');
   const [boxe1Mort, setBoxe1Mort] = useState('');
   const [boxe2Mort, setBoxe2Mort] = useState('');
-  const [tablettesVendues, setTablettesVendues] = useState('');
-  const [consoAliment, setConsoAliment] = useState('');
-  const [autoSyncStock, setAutoSyncStock] = useState(true);
 
   const [batchModal, setBatchModal] = useState(false);
   const [newBoxe1, setNewBoxe1] = useState('');
@@ -73,8 +70,6 @@ export default function ProductionScreen({ navigation }) {
   const b2ProdLocked = Number(existingForDate?.boxe2Produits) > 0;
   const b1MortLocked = Number(existingForDate?.boxe1Mortalite) > 0;
   const b2MortLocked = Number(existingForDate?.boxe2Mortalite) > 0;
-  const alimLocked = Number(existingForDate?.consoAliment) > 0;
-  const vendusLocked = Number(existingForDate?.tablettesVendues) > 0;
 
   const liveBoxe1P = b1ProdLocked ? 0 : Number(boxe1Prod) || 0;
   const liveBoxe2P = b2ProdLocked ? 0 : Number(boxe2Prod) || 0;
@@ -86,8 +81,6 @@ export default function ProductionScreen({ navigation }) {
 
   const liveBoxe1M = b1MortLocked ? 0 : Number(boxe1Mort) || 0;
   const liveBoxe2M = b2MortLocked ? 0 : Number(boxe2Mort) || 0;
-  const liveConso = alimLocked ? 0 : Number(consoAliment) || 0;
-  const liveVendus = vendusLocked ? 0 : Number(tablettesVendues) || 0;
 
   const s = summary || {};
   const liveRestantVivant = Math.max(0, (s.vivantsTotal || 7385) - (liveBoxe1M + liveBoxe2M));
@@ -95,15 +88,8 @@ export default function ProductionScreen({ navigation }) {
   const handleSaveProduction = async () => {
     if (!canEdit) return;
 
-    if (
-      liveBoxe1P === 0 &&
-      liveBoxe2P === 0 &&
-      liveBoxe1M === 0 &&
-      liveBoxe2M === 0 &&
-      liveConso === 0 &&
-      liveVendus === 0
-    ) {
-      Alert.alert('Saisie requise', 'Veuillez renseigner au moins un nouveau détail pour cette date.');
+    if (liveBoxe1P === 0 && liveBoxe2P === 0 && liveBoxe1M === 0 && liveBoxe2M === 0) {
+      Alert.alert('Saisie requise', 'Veuillez renseigner au moins un détail (Production ou Mortalité) pour cette date.');
       return;
     }
 
@@ -113,9 +99,7 @@ export default function ProductionScreen({ navigation }) {
       boxe2Produits: liveBoxe2P,
       boxe1Mortalite: liveBoxe1M,
       boxe2Mortalite: liveBoxe2M,
-      tablettesVendues: liveVendus,
-      consoAliment: liveConso,
-      autoSyncStockage: autoSyncStock,
+      autoSyncStockage: true,
       auteur: user?.nom || user?.role || '',
     });
 
@@ -133,10 +117,14 @@ export default function ProductionScreen({ navigation }) {
     setBoxe2Prod('');
     setBoxe1Mort('');
     setBoxe2Mort('');
-    setTablettesVendues('');
-    setConsoAliment('');
 
-    Alert.alert('Enregistré', `Détails du ${cleanDate} mis à jour.`);
+    const addedProd = liveBoxe1P + liveBoxe2P;
+    Alert.alert(
+      'Enregistré',
+      addedProd > 0
+        ? `Production du ${cleanDate} enregistrée (+${addedProd} tablettes ajoutées automatiquement au Stock d’Œufs).`
+        : `Mortalité du ${cleanDate} enregistrée.`
+    );
   };
 
   const handleAddBatch = async () => {
@@ -262,7 +250,7 @@ export default function ProductionScreen({ navigation }) {
                 <View style={styles.formHeader}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons name="add-circle" size={22} color={COLORS.primary} />
-                    <Text style={styles.formTitle}>Saisie des détails du jour</Text>
+                    <Text style={styles.formTitle}>Relevé du jour</Text>
                   </View>
                   <TouchableOpacity
                     style={styles.reportMiniBtn}
@@ -278,10 +266,10 @@ export default function ProductionScreen({ navigation }) {
                   style={styles.dateInput}
                   value={date}
                   onChangeText={setDate}
-                  placeholder="2026-11-04"
+                  placeholder="2026-11-05"
                 />
 
-                <Text style={styles.sectionSubHeader}>Tablettes par Boxe</Text>
+                <Text style={styles.sectionSubHeader}>Production d’œufs (Tablettes)</Text>
                 <View style={styles.twoColRow}>
                   <View style={styles.colBox}>
                     <Text style={styles.colLabel}>Boxe 1</Text>
@@ -289,7 +277,7 @@ export default function ProductionScreen({ navigation }) {
                       <View style={styles.lockedFieldBox}>
                         <Ionicons name="lock-closed" size={14} color="#15803D" />
                         <Text style={styles.lockedFieldText}>
-                          Déjà ajouté : {existingForDate.boxe1Produits}
+                          Déjà saisi : {existingForDate.boxe1Produits}
                         </Text>
                       </View>
                     ) : (
@@ -310,7 +298,7 @@ export default function ProductionScreen({ navigation }) {
                       <View style={styles.lockedFieldBox}>
                         <Ionicons name="lock-closed" size={14} color="#15803D" />
                         <Text style={styles.lockedFieldText}>
-                          Déjà ajouté : {existingForDate.boxe2Produits}
+                          Déjà saisi : {existingForDate.boxe2Produits}
                         </Text>
                       </View>
                     ) : (
@@ -328,8 +316,8 @@ export default function ProductionScreen({ navigation }) {
 
                 <View style={styles.autoCalcBanner}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Ionicons name="calculator" size={20} color="#78350F" />
-                    <Text style={styles.autoCalcLabel}>Total Production ({cleanDate})</Text>
+                    <Ionicons name="sync-circle" size={20} color="#78350F" />
+                    <Text style={styles.autoCalcLabel}>Ajout auto au Stock ({cleanDate})</Text>
                   </View>
                   <Text style={styles.autoCalcValue}>{formatNumber(totalDayProduction)} tab.</Text>
                 </View>
@@ -342,7 +330,7 @@ export default function ProductionScreen({ navigation }) {
                       <View style={styles.lockedFieldBox}>
                         <Ionicons name="lock-closed" size={14} color="#B91C1C" />
                         <Text style={[styles.lockedFieldText, { color: '#B91C1C' }]}>
-                          Déjà ajouté : {existingForDate.boxe1Mortalite}
+                          Déjà saisi : {existingForDate.boxe1Mortalite}
                         </Text>
                       </View>
                     ) : (
@@ -363,7 +351,7 @@ export default function ProductionScreen({ navigation }) {
                       <View style={styles.lockedFieldBox}>
                         <Ionicons name="lock-closed" size={14} color="#B91C1C" />
                         <Text style={[styles.lockedFieldText, { color: '#B91C1C' }]}>
-                          Déjà ajouté : {existingForDate.boxe2Mortalite}
+                          Déjà saisi : {existingForDate.boxe2Mortalite}
                         </Text>
                       </View>
                     ) : (
@@ -379,72 +367,14 @@ export default function ProductionScreen({ navigation }) {
                   </View>
                 </View>
 
-                <Text style={styles.sectionSubHeader}>Aliment & Ventes</Text>
-                <View style={styles.twoColRow}>
-                  <View style={styles.colBox}>
-                    <Text style={styles.colLabel}>Aliment (Sacs)</Text>
-                    {alimLocked ? (
-                      <View style={styles.lockedFieldBox}>
-                        <Ionicons name="lock-closed" size={14} color="#15803D" />
-                        <Text style={styles.lockedFieldText}>
-                          Déjà ajouté : {existingForDate.consoAliment} sacs
-                        </Text>
-                      </View>
-                    ) : (
-                      <TextInput
-                        style={styles.numInput}
-                        keyboardType="numeric"
-                        placeholder="0"
-                        placeholderTextColor={COLORS.textMuted}
-                        value={consoAliment}
-                        onChangeText={setConsoAliment}
-                      />
-                    )}
-                  </View>
-
-                  <View style={styles.colBox}>
-                    <Text style={styles.colLabel}>Tablettes Vendues</Text>
-                    {vendusLocked ? (
-                      <View style={styles.lockedFieldBox}>
-                        <Ionicons name="lock-closed" size={14} color="#15803D" />
-                        <Text style={styles.lockedFieldText}>
-                          Déjà ajouté : {existingForDate.tablettesVendues}
-                        </Text>
-                      </View>
-                    ) : (
-                      <TextInput
-                        style={styles.numInput}
-                        keyboardType="numeric"
-                        placeholder="0"
-                        placeholderTextColor={COLORS.textMuted}
-                        value={tablettesVendues}
-                        onChangeText={setTablettesVendues}
-                      />
-                    )}
-                  </View>
-                </View>
-
                 <View style={styles.livingInfoBar}>
                   <Text style={styles.livingInfoText}>
                     Restant vivant :{' '}
                     <Text style={{ fontWeight: '900', color: COLORS.secondary }}>
-                      {formatNumber(liveRestantVivant)}
+                      {formatNumber(liveRestantVivant)} poulets
                     </Text>
                   </Text>
                 </View>
-
-                <TouchableOpacity
-                  style={styles.checkboxRow}
-                  onPress={() => setAutoSyncStock(!autoSyncStock)}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons
-                    name={autoSyncStock ? 'checkbox' : 'square-outline'}
-                    size={22}
-                    color={COLORS.secondary}
-                  />
-                  <Text style={styles.checkboxLabel}>Synchroniser avec le stock</Text>
-                </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.saveButton}
@@ -452,7 +382,7 @@ export default function ProductionScreen({ navigation }) {
                   activeOpacity={0.85}
                 >
                   <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
-                  <Text style={styles.saveButtonText}>Enregistrer les nouveaux détails</Text>
+                  <Text style={styles.saveButtonText}>Enregistrer</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -480,7 +410,7 @@ export default function ProductionScreen({ navigation }) {
                   </View>
                   <View style={styles.totalProdBadge}>
                     <Text style={styles.totalProdBadgeText}>
-                      {formatNumber(row.totalProduits)} tab.
+                      +{formatNumber(row.totalProduits)} tab.
                     </Text>
                   </View>
                 </View>
@@ -488,14 +418,14 @@ export default function ProductionScreen({ navigation }) {
                 <View style={styles.prodMetricsGrid}>
                   <View style={styles.metricMini}>
                     <Text style={styles.metricMiniLbl}>Boxe 1</Text>
-                    <Text style={styles.metricMiniVal}>{row.boxe1Produits}</Text>
+                    <Text style={styles.metricMiniVal}>{row.boxe1Produits} tab.</Text>
                   </View>
                   <View style={styles.metricMini}>
                     <Text style={styles.metricMiniLbl}>Boxe 2</Text>
-                    <Text style={styles.metricMiniVal}>{row.boxe2Produits}</Text>
+                    <Text style={styles.metricMiniVal}>{row.boxe2Produits} tab.</Text>
                   </View>
                   <View style={styles.metricMini}>
-                    <Text style={styles.metricMiniLbl}>Morts</Text>
+                    <Text style={styles.metricMiniLbl}>Morts (B1/B2)</Text>
                     <Text
                       style={[
                         styles.metricMiniVal,
@@ -506,8 +436,10 @@ export default function ProductionScreen({ navigation }) {
                     </Text>
                   </View>
                   <View style={styles.metricMini}>
-                    <Text style={styles.metricMiniLbl}>Aliment</Text>
-                    <Text style={styles.metricMiniVal}>{row.consoAliment} sacs</Text>
+                    <Text style={styles.metricMiniLbl}>Vivants</Text>
+                    <Text style={[styles.metricMiniVal, { color: COLORS.secondary }]}>
+                      {formatNumber(row.restantVivant || s.vivantsTotal)}
+                    </Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -803,12 +735,12 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   autoCalcLabel: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '900',
     color: '#713F12',
   },
   autoCalcValue: {
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '900',
     color: '#78350F',
   },
@@ -823,17 +755,6 @@ const styles = StyleSheet.create({
     color: '#14532D',
     fontWeight: '700',
   },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginVertical: 6,
-  },
-  checkboxLabel: {
-    fontSize: 12.5,
-    color: COLORS.textSecondary,
-    fontWeight: '700',
-  },
   saveButton: {
     backgroundColor: COLORS.secondary,
     height: 50,
@@ -846,7 +767,7 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     color: '#FFFFFF',
-    fontSize: 14.5,
+    fontSize: 15,
     fontWeight: '800',
   },
   historyHeaderRow: {

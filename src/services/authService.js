@@ -14,6 +14,7 @@ import {
 import { auth, db } from '../config/firebase';
 
 const STORAGE_USERS_KEY = '@gps_users_v1';
+const STORAGE_DELETED_USERS_KEY = '@gps_deleted_users_v1';
 const STORAGE_CURRENT_USER_KEY = '@gps_current_user_v1';
 const FIRESTORE_USERS_COL = 'gps_users';
 
@@ -41,6 +42,7 @@ export const DEFAULT_USERS = [
     adresse: 'GestionP - Direction',
     statut: 'valide',
     createdAt: '2026-03-24',
+    updatedAt: 1000,
   },
   {
     id: 'usr_gerant_1',
@@ -52,6 +54,7 @@ export const DEFAULT_USERS = [
     adresse: 'GestionP - Site Principal',
     statut: 'valide',
     createdAt: '2026-03-24',
+    updatedAt: 1000,
   },
   {
     id: 'usr_emp_1',
@@ -63,6 +66,7 @@ export const DEFAULT_USERS = [
     adresse: 'GestionP - Boxe 1',
     statut: 'valide',
     createdAt: '2026-03-24',
+    updatedAt: 1000,
   },
   {
     id: 'usr_emp_2',
@@ -74,6 +78,7 @@ export const DEFAULT_USERS = [
     adresse: 'GestionP - Boxe 2',
     statut: 'valide',
     createdAt: '2026-03-24',
+    updatedAt: 1000,
   },
   {
     id: 'usr_emp_pending',
@@ -85,6 +90,7 @@ export const DEFAULT_USERS = [
     adresse: 'GestionP - Stockage',
     statut: 'en_attente',
     createdAt: '2026-11-04',
+    updatedAt: 1000,
   },
   {
     id: 'usr_client_1',
@@ -96,6 +102,7 @@ export const DEFAULT_USERS = [
     adresse: 'Thiès / Dakar',
     statut: 'valide',
     createdAt: '2026-06-20',
+    updatedAt: 1000,
   },
   {
     id: 'usr_client_2',
@@ -107,60 +114,92 @@ export const DEFAULT_USERS = [
     adresse: 'Thiès',
     statut: 'valide',
     createdAt: '2026-07-05',
+    updatedAt: 1000,
   },
 ];
 
 // --- CACHE MÉMOIRE SYNCHRONE (0 ms pour éviter tout flash d'interface) ---
 let cachedCurrentUser = null;
 let cachedUsersList = [...DEFAULT_USERS];
+let cachedDeletedIds = [];
+let hasLoadedUsersFromDisk = false;
 let isSyncingFirestoreUsers = false;
 
 export const getCachedUser = () => cachedCurrentUser;
 export const getCachedUsers = () => cachedUsersList;
 
-// Synchronisation Firestore non-bloquante en arrière-plan
-const syncUsersWithFirestoreInBackground = async (localUsers) => {
+// Garantit qu'aucun doublon d'ID ou de téléphone n'existe jamais et exclut les comptes supprimés
+const deduplicateUsers = (usersArray, deletedIds = []) => {
+  const deletedSet = new Set(deletedIds);
+  const byId = new Map();
+
+  for (const rawUser of usersArray || []) {
+    if (!rawUser || !rawUser.id || rawUser.deleted || deletedSet.has(rawUser.id)) {
+      continue;
+    }
+    const existing = byId.get(rawUser.id);
+    if (!existing || (Number(rawUser.updatedAt) || 0) >= (Number(existing.updatedAt) || 0)) {
+      byId.set(rawUser.id, {
+        ...existing,
+        ...rawUser,
+        telephone: cleanPhone(rawUser.telephone),
+      });
+    }
+  }
+
+  return Array.from(byId.values());
+};
+
+const loadDeletedIds = async () => {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_DELETED_USERS_KEY);
+    if (raw) {
+      cachedDeletedIds = JSON.parse(raw);
+    }
+  } catch (e) {}
+  return cachedDeletedIds;
+};
+
+// Synchronisation Firestore non-bloquante en arrière-plan (fusion par ID unique)
+const syncUsersWithFirestoreInBackground = async () => {
   if (isSyncingFirestoreUsers) return;
   isSyncingFirestoreUsers = true;
   try {
+    const deletedIds = await loadDeletedIds();
     const snap = await getDocs(collection(db, FIRESTORE_USERS_COL));
     if (!snap.empty) {
-      const cloudMap = {};
+      const cloudUsers = [];
+      const cloudDeletedIds = [...deletedIds];
+
       snap.forEach((d) => {
         const u = d.data();
-        if (u && u.telephone) {
-          cloudMap[cleanPhone(u.telephone)] = { ...u, id: d.id };
+        const docId = d.id;
+        if (u && u.deleted) {
+          if (!cloudDeletedIds.includes(docId)) cloudDeletedIds.push(docId);
+        } else if (u && (u.telephone || u.nom)) {
+          cloudUsers.push({ ...u, id: u.id || docId });
         }
       });
 
-      const mergedMap = {};
-      for (const u of DEFAULT_USERS) {
-        mergedMap[cleanPhone(u.telephone)] = u;
-      }
-      for (const u of localUsers) {
-        mergedMap[cleanPhone(u.telephone)] = u;
-      }
-      for (const [tel, u] of Object.entries(cloudMap)) {
-        mergedMap[tel] = { ...(mergedMap[tel] || {}), ...u };
-      }
+      cachedDeletedIds = cloudDeletedIds;
+      await AsyncStorage.setItem(STORAGE_DELETED_USERS_KEY, JSON.stringify(cloudDeletedIds));
 
-      const mergedList = Object.values(mergedMap);
+      // Fusionner par ID : DEFAULT_USERS -> local -> cloud (le plus récent updatedAt gagne)
+      const combined = [...DEFAULT_USERS, ...cachedUsersList, ...cloudUsers];
+      const mergedList = deduplicateUsers(combined, cloudDeletedIds);
+
       cachedUsersList = mergedList;
       await AsyncStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(mergedList));
 
       if (cachedCurrentUser) {
-        const updatedMe = mergedList.find(
-          (u) =>
-            u.id === cachedCurrentUser.id ||
-            cleanPhone(u.telephone) === cleanPhone(cachedCurrentUser.telephone)
-        );
+        const updatedMe = mergedList.find((u) => u.id === cachedCurrentUser.id);
         if (updatedMe) {
           cachedCurrentUser = updatedMe;
           await AsyncStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(updatedMe));
         }
       }
     } else {
-      for (const u of localUsers) {
+      for (const u of cachedUsersList) {
         setDoc(doc(db, FIRESTORE_USERS_COL, u.id), u).catch(() => {});
       }
     }
@@ -173,30 +212,42 @@ const syncUsersWithFirestoreInBackground = async (localUsers) => {
 
 // Récupérer tous les utilisateurs rapidement (local immédiat + sync cloud en arrière-plan)
 export const getAllUsers = async () => {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_USERS_KEY);
-    if (raw) {
-      cachedUsersList = JSON.parse(raw);
-    } else {
-      cachedUsersList = [...DEFAULT_USERS];
+  const deletedIds = await loadDeletedIds();
+
+  if (!hasLoadedUsersFromDisk) {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_USERS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        cachedUsersList = deduplicateUsers(parsed, deletedIds);
+      } else {
+        cachedUsersList = deduplicateUsers(DEFAULT_USERS, deletedIds);
+      }
+      hasLoadedUsersFromDisk = true;
       await AsyncStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(cachedUsersList));
+    } catch (e) {
+      cachedUsersList = deduplicateUsers(DEFAULT_USERS, deletedIds);
+      hasLoadedUsersFromDisk = true;
     }
-  } catch (e) {
-    cachedUsersList = [...DEFAULT_USERS];
+  } else {
+    cachedUsersList = deduplicateUsers(cachedUsersList, deletedIds);
   }
 
   // Lancer la synchronisation cloud sans bloquer l'affichage
-  syncUsersWithFirestoreInBackground(cachedUsersList);
+  syncUsersWithFirestoreInBackground();
 
   return cachedUsersList;
 };
 
 const saveUsersList = async (users, updatedUser = null) => {
-  cachedUsersList = users;
-  await AsyncStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
+  const cleanList = deduplicateUsers(users, cachedDeletedIds);
+  cachedUsersList = cleanList;
+  hasLoadedUsersFromDisk = true;
+  await AsyncStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(cleanList));
   if (updatedUser && updatedUser.id) {
     setDoc(doc(db, FIRESTORE_USERS_COL, updatedUser.id), updatedUser, { merge: true }).catch(() => {});
   }
+  return cleanList;
 };
 
 // Connexion ultra-rapide par Numéro de Téléphone + Mot de Passe
@@ -227,7 +278,7 @@ export const loginWithPhoneAndPassword = async (telephoneInput, passwordInput) =
   if (!user) {
     return {
       success: false,
-      error: "Aucun compte trouvé avec ce numéro de téléphone.",
+      error: 'Aucun compte trouvé avec ce numéro de téléphone.',
     };
   }
 
@@ -317,6 +368,7 @@ export const registerWithPhoneAndPassword = async ({
     adresse: String(adresse || '').trim() || 'Sénégal',
     statut,
     createdAt: new Date().toISOString().split('T')[0],
+    updatedAt: Date.now(),
   };
 
   const updatedUsers = [newUser, ...users];
@@ -362,7 +414,10 @@ export const logoutUser = async () => {
 
 // Modifier son propre profil
 export const updateUserProfile = async (userId, updates) => {
-  const users = await getAllUsers();
+  if (!hasLoadedUsersFromDisk) {
+    await getAllUsers();
+  }
+  const users = [...cachedUsersList];
   const idx = users.findIndex((u) => u.id === userId);
   if (idx === -1) {
     return { success: false, error: 'Utilisateur introuvable.' };
@@ -380,51 +435,65 @@ export const updateUserProfile = async (userId, updates) => {
   const updatedUser = {
     ...users[idx],
     ...updates,
+    updatedAt: Date.now(),
   };
   users[idx] = updatedUser;
-  await saveUsersList(users, updatedUser);
+  const savedList = await saveUsersList(users, updatedUser);
 
   if (cachedCurrentUser && cachedCurrentUser.id === userId) {
     cachedCurrentUser = updatedUser;
     await AsyncStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(updatedUser));
   }
 
-  return { success: true, user: updatedUser };
+  return { success: true, user: updatedUser, users: savedList };
 };
 
-// Fonctions Administrateur
+// Fonctions Administrateur : Modifier un compte (instantané et persistant)
 export const adminUpdateUser = async (userId, updates) => {
-  const users = await getAllUsers();
+  if (!hasLoadedUsersFromDisk) {
+    await getAllUsers();
+  }
+  const users = [...cachedUsersList];
   const idx = users.findIndex((u) => u.id === userId);
   if (idx === -1) {
     return { success: false, error: 'Utilisateur introuvable.' };
   }
 
   if (updates.telephone) {
-    updates.telephone = cleanPhone(updates.telephone);
+    const cleanNewTel = cleanPhone(updates.telephone);
+    const duplicate = users.find((u) => u.id !== userId && cleanPhone(u.telephone) === cleanNewTel);
+    if (duplicate) {
+      return { success: false, error: 'Ce numéro de téléphone est déjà utilisé par un autre compte.' };
+    }
+    updates.telephone = cleanNewTel;
   }
 
   const updatedUser = {
     ...users[idx],
     ...updates,
+    updatedAt: Date.now(),
   };
   users[idx] = updatedUser;
-  await saveUsersList(users, updatedUser);
+  const savedList = await saveUsersList(users, updatedUser);
 
   if (cachedCurrentUser && cachedCurrentUser.id === userId) {
     cachedCurrentUser = updatedUser;
     await AsyncStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(updatedUser));
   }
 
-  return { success: true, user: updatedUser };
+  return { success: true, user: updatedUser, users: savedList };
 };
 
+// Créer un compte depuis l'espace Administrateur
 export const adminCreateUser = async ({ nom, telephone, password, role, poste, adresse }) => {
+  if (!hasLoadedUsersFromDisk) {
+    await getAllUsers();
+  }
   const tel = cleanPhone(telephone);
   if (!nom || !tel || !password) {
     return { success: false, error: 'Nom, téléphone et mot de passe sont obligatoires.' };
   }
-  const users = await getAllUsers();
+  const users = [...cachedUsersList];
   if (users.some((u) => cleanPhone(u.telephone) === tel)) {
     return { success: false, error: 'Ce numéro de téléphone existe déjà.' };
   }
@@ -447,18 +516,35 @@ export const adminCreateUser = async ({ nom, telephone, password, role, poste, a
     adresse: adresse || 'GestionP',
     statut: 'valide',
     createdAt: new Date().toISOString().split('T')[0],
+    updatedAt: Date.now(),
   };
 
   const updatedUsers = [newUser, ...users];
-  await saveUsersList(updatedUsers, newUser);
-  return { success: true, user: newUser };
+  const savedList = await saveUsersList(updatedUsers, newUser);
+  return { success: true, user: newUser, users: savedList };
 };
 
+// Supprimer définitivement un compte depuis l'espace Administrateur
 export const adminDeleteUser = async (userId) => {
-  const users = await getAllUsers();
-  const filtered = users.filter((u) => u.id !== userId);
+  if (!hasLoadedUsersFromDisk) {
+    await getAllUsers();
+  }
+  await loadDeletedIds();
+  if (!cachedDeletedIds.includes(userId)) {
+    cachedDeletedIds = [...cachedDeletedIds, userId];
+    await AsyncStorage.setItem(STORAGE_DELETED_USERS_KEY, JSON.stringify(cachedDeletedIds));
+  }
+
+  const filtered = cachedUsersList.filter((u) => u.id !== userId);
   cachedUsersList = filtered;
   await AsyncStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(filtered));
-  deleteDoc(doc(db, FIRESTORE_USERS_COL, userId)).catch(() => {});
-  return { success: true };
+
+  // Marquer comme supprimé dans Firestore pour qu'il ne revienne jamais lors de la synchro
+  setDoc(
+    doc(db, FIRESTORE_USERS_COL, userId),
+    { id: userId, deleted: true, updatedAt: Date.now() },
+    { merge: true }
+  ).catch(() => {});
+
+  return { success: true, users: filtered };
 };

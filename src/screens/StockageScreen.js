@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import NavigationLayout from '../components/NavigationLayout';
-import { COLORS, SHADOWS, formatNumber } from '../theme/colors';
+import { COLORS, SHADOWS, formatNumber, formatFCFA } from '../theme/colors';
 import { getCachedUser, getCurrentUser } from '../services/authService';
 import {
   getCachedWorkbook,
@@ -23,22 +23,34 @@ import {
 
 export default function StockageScreen({ navigation }) {
   // Initialisation synchrone en 0 ms depuis le cache mémoire (aucun flash d'interface)
+  const initS = getCachedSummary();
   const [user, setUser] = useState(() => getCachedUser());
   const [workbook, setWorkbook] = useState(() => getCachedWorkbook());
-  const [summary, setSummary] = useState(() => getCachedSummary());
+  const [summary, setSummary] = useState(() => initS);
   const [activeType, setActiveType] = useState('aliment');
 
+  // Pour les sacs d'aliment : choix clair entre 'sortie' (Consommation) ou 'entree' (Arrivage)
+  const [alimentMode, setAlimentMode] = useState('sortie');
+
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [entrees, setEntrees] = useState('');
-  const [sorties, setSorties] = useState('');
+  const [quantite, setQuantite] = useState('');
   const [note, setNote] = useState('');
+
+  // Pour une sortie de tablettes d'œufs : prise en compte du prix unitaire évolutif
+  const [isSaleFacture, setIsSaleFacture] = useState(true);
+  const [prixUnitaireOeuf, setPrixUnitaireOeuf] = useState(() =>
+    String(initS?.prixTabletteDefaut || 2200)
+  );
+  const [statutPaiement, setStatutPaiement] = useState('Payé');
 
   const loadData = async () => {
     const u = await getCurrentUser();
     if (u) setUser(u);
     const wb = await loadFarmWorkbook();
     setWorkbook(wb);
-    setSummary(computeFarmSummary(wb));
+    const s = computeFarmSummary(wb);
+    setSummary(s);
+    setPrixUnitaireOeuf(String(s.prixTabletteDefaut || 2200));
   };
 
   useEffect(() => {
@@ -53,26 +65,36 @@ export default function StockageScreen({ navigation }) {
   const canEdit = user?.role === 'employe' || user?.role === 'gerant';
 
   const s = summary || {};
-  const entNum = Number(entrees) || 0;
-  const sortNum = Number(sorties) || 0;
+  const qteNum = Number(quantite) || 0;
+  const cleanDate = date.trim();
+
+  // Production d'œufs déjà enregistrée automatiquement depuis la page Production à cette date
+  const prodRecordOfDate = (workbook?.production || []).find((r) => r.date === cleanDate);
+  const autoProdTablettesOfDate = Number(prodRecordOfDate?.totalProduits) || 0;
 
   const fullList =
     activeType === 'aliment'
       ? workbook?.stockageAliment || []
       : workbook?.stockageOeufs || [];
 
-  const cleanDate = date.trim();
   const detailsOfDate = fullList.filter((r) => r.date === cleanDate);
+
+  // Dans Aliment : soit entrée (arrivage), soit sortie (consommation).
+  // Dans Œufs : les entrées viennent 100% automatiquement de Production, donc ici uniquement Sortie !
+  const entNum = activeType === 'aliment' && alimentMode === 'entree' ? qteNum : 0;
+  const sortNum = activeType === 'aliment' ? (alimentMode === 'sortie' ? qteNum : 0) : qteNum;
 
   const currentStock =
     activeType === 'aliment' ? s.stockSacsAlimentRestant || 0 : s.stockTablettesDisponibles || 0;
   const projectedStock = Math.max(0, currentStock + entNum - sortNum);
+  const puNum = Number(prixUnitaireOeuf) || s.prixTabletteDefaut || 2200;
+  const liveMontantVente = sortNum * puNum;
 
   const handleSaveMovement = async () => {
     if (!canEdit) return;
 
-    if (entNum === 0 && sortNum === 0) {
-      Alert.alert('Champs requis', 'Veuillez saisir un nombre en Entrées ou Sorties.');
+    if (qteNum <= 0) {
+      Alert.alert('Quantité requise', 'Veuillez saisir une quantité supérieure à 0.');
       return;
     }
 
@@ -82,23 +104,36 @@ export default function StockageScreen({ navigation }) {
         date: cleanDate,
         entrees: entNum,
         sorties: sortNum,
-        note: note.trim(),
+        note:
+          note.trim() ||
+          (entNum > 0 ? 'Arrivage sacs aliment' : 'Consommation du jour'),
         auteur: user?.nom || user?.role || '',
       });
     } else {
       updated = await addStockageOeufsMovement({
         date: cleanDate,
-        entrees: entNum,
+        entrees: 0, // Les entrées d'œufs proviennent uniquement et automatiquement de la page Production
         sorties: sortNum,
-        note: note.trim(),
+        note: note.trim() || (isSaleFacture ? 'Client Comptoir' : 'Sortie stock'),
         auteur: user?.nom || user?.role || '',
+        createFacture: isSaleFacture,
+        prixUnitaire: puNum,
+        statutFacture: statutPaiement,
       });
+    }
+
+    if (updated?.insufficientStock) {
+      Alert.alert(
+        'Stock insuffisant',
+        `Impossible de sortir ${qteNum} ${activeType === 'aliment' ? 'sacs' : 'tablettes'} : il ne reste que ${updated.availableStock} en stock.`
+      );
+      return;
     }
 
     if (updated?.alreadyExists) {
       Alert.alert(
         'Détail déjà ajouté',
-        `Ce détail (+${entNum} / -${sortNum}${note.trim() ? ` - ${note.trim()}` : ''}) a déjà été enregistré pour le ${cleanDate}.`
+        `Ce mouvement a déjà été enregistré pour le ${cleanDate}.`
       );
       return;
     }
@@ -106,11 +141,15 @@ export default function StockageScreen({ navigation }) {
     const nextSummary = computeFarmSummary(updated);
     setWorkbook(updated);
     setSummary(nextSummary);
-    setEntrees('');
-    setSorties('');
+    setQuantite('');
     setNote('');
 
-    Alert.alert('Enregistré', `Nouveau stock : ${projectedStock}`);
+    Alert.alert(
+      'Enregistré',
+      activeType === 'oeufs' && isSaleFacture
+        ? `Sortie de ${sortNum} tablettes enregistrée (${formatFCFA(liveMontantVente)}). Nouveau stock : ${projectedStock} tab.`
+        : `Mouvement enregistré. Nouveau stock : ${projectedStock}`
+    );
   };
 
   const listData = fullList.slice(0, 35);
@@ -127,7 +166,10 @@ export default function StockageScreen({ navigation }) {
         <View style={styles.switchBar}>
           <TouchableOpacity
             style={[styles.switchBtn, activeType === 'aliment' && styles.switchBtnActive]}
-            onPress={() => setActiveType('aliment')}
+            onPress={() => {
+              setActiveType('aliment');
+              setQuantite('');
+            }}
           >
             <Ionicons
               name="cube"
@@ -141,7 +183,10 @@ export default function StockageScreen({ navigation }) {
 
           <TouchableOpacity
             style={[styles.switchBtn, activeType === 'oeufs' && styles.switchBtnActive]}
-            onPress={() => setActiveType('oeufs')}
+            onPress={() => {
+              setActiveType('oeufs');
+              setQuantite('');
+            }}
           >
             <Ionicons
               name="egg"
@@ -173,25 +218,43 @@ export default function StockageScreen({ navigation }) {
         {activeType === 'aliment' ? (
           <View style={styles.summaryHero}>
             <View style={styles.summaryCol}>
-              <Text style={styles.summaryLabel}>TOTAL ENTRÉES</Text>
-              <Text style={styles.summaryBigVal}>{formatNumber(s.totalSacsAlimentEntres)} sacs</Text>
+              <Text style={styles.summaryLabel}>TOTAL ENTRÉES • SORTIES</Text>
+              <Text style={styles.summaryBigVal}>
+                +{formatNumber(s.totalSacsAlimentEntres)} / -{formatNumber(s.totalSacsAlimentSortis)}
+              </Text>
             </View>
             <View style={styles.summaryBadgeBox}>
               <Text style={styles.stockRestantNum}>{formatNumber(s.stockSacsAlimentRestant)}</Text>
-              <Text style={styles.stockRestantLbl}>En Stock</Text>
+              <Text style={styles.stockRestantLbl}>Sacs en Stock</Text>
             </View>
           </View>
         ) : (
           <View style={[styles.summaryHero, { backgroundColor: COLORS.secondaryDark }]}>
             <View style={styles.summaryCol}>
-              <Text style={styles.summaryLabel}>TOTAL ENTRÉES</Text>
-              <Text style={styles.summaryBigVal}>{formatNumber(s.totalOeufsEntres)} tab.</Text>
+              <Text style={styles.summaryLabel}>PRODUITS (AUTO) • SORTIS</Text>
+              <Text style={styles.summaryBigVal}>
+                +{formatNumber(s.totalOeufsEntres)} / -{formatNumber(s.totalOeufsSortis)}
+              </Text>
             </View>
             <View style={[styles.summaryBadgeBox, { backgroundColor: '#22C55E' }]}>
               <Text style={[styles.stockRestantNum, { color: '#FFFFFF' }]}>
                 {formatNumber(s.stockTablettesDisponibles)}
               </Text>
-              <Text style={[styles.stockRestantLbl, { color: '#DCFCE7' }]}>En Stock</Text>
+              <Text style={[styles.stockRestantLbl, { color: '#DCFCE7' }]}>Tab. en Stock</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Bandeau d'information automatique pour les Œufs : aucune ressaisie de la production ! */}
+        {activeType === 'oeufs' && (
+          <View style={styles.autoProdInfoCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+              <Ionicons name="checkmark-done-circle" size={20} color="#15803D" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.autoProdTitle}>
+                  Production du {cleanDate} reçue automatiquement : +{formatNumber(autoProdTablettesOfDate)} tab.
+                </Text>
+              </View>
             </View>
           </View>
         )}
@@ -200,7 +263,11 @@ export default function StockageScreen({ navigation }) {
         {canEdit && (
           <View style={styles.formCard}>
             <View style={styles.formHeaderRow}>
-              <Text style={styles.formTitle}>Nouveau détail de stock</Text>
+              <Text style={styles.formTitle}>
+                {activeType === 'aliment'
+                  ? 'Mouvement de Sacs d’Aliment'
+                  : 'Sortie / Vente de Tablettes'}
+              </Text>
               <TouchableOpacity
                 style={styles.reportMiniBtn}
                 onPress={() => navigation.navigate('RapportJournalier', { date: cleanDate })}
@@ -216,47 +283,176 @@ export default function StockageScreen({ navigation }) {
             {detailsOfDate.length > 0 && (
               <View style={styles.alreadyAddedBox}>
                 <Text style={styles.alreadyAddedTitle}>
-                  Détails déjà ajoutés le {cleanDate} ({detailsOfDate.length}) :
+                  Mouvements du {cleanDate} ({detailsOfDate.length}) :
                 </Text>
                 {detailsOfDate.map((d) => (
                   <View key={d.id} style={styles.alreadyAddedRow}>
                     <Ionicons name="lock-closed" size={13} color="#15803D" />
                     <Text style={styles.alreadyAddedText}>
-                      +{d.entrees} / -{d.sorties} {d.note ? `(${d.note})` : ''}
+                      {d.entrees > 0 ? `+${d.entrees} entrés ` : ''}
+                      {d.sorties > 0 ? `-${d.sorties} sortis ` : ''}
+                      {d.note ? `(${d.note})` : ''}
                     </Text>
                   </View>
                 ))}
               </View>
             )}
 
-            <View style={styles.twoCol}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.inputLabel, { color: COLORS.secondary }]}>+ Entrées</Text>
+            {activeType === 'aliment' ? (
+              <>
+                <Text style={styles.inputLabel}>Type d’opération</Text>
+                <View style={styles.modeSelectorRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.modeChip,
+                      alimentMode === 'sortie' && styles.modeChipSortieActive,
+                    ]}
+                    onPress={() => setAlimentMode('sortie')}
+                  >
+                    <Ionicons
+                      name="remove-circle"
+                      size={17}
+                      color={alimentMode === 'sortie' ? '#FFFFFF' : COLORS.danger}
+                    />
+                    <Text
+                      style={[
+                        styles.modeChipText,
+                        alimentMode === 'sortie' && { color: '#FFFFFF' },
+                      ]}
+                    >
+                      Consommation (- Sortie)
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modeChip,
+                      alimentMode === 'entree' && styles.modeChipEntreeActive,
+                    ]}
+                    onPress={() => setAlimentMode('entree')}
+                  >
+                    <Ionicons
+                      name="add-circle"
+                      size={17}
+                      color={alimentMode === 'entree' ? '#FFFFFF' : COLORS.secondary}
+                    />
+                    <Text
+                      style={[
+                        styles.modeChipText,
+                        alimentMode === 'entree' && { color: '#FFFFFF' },
+                      ]}
+                    >
+                      Arrivage (+ Entrée)
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    { color: alimentMode === 'entree' ? COLORS.secondary : COLORS.danger },
+                  ]}
+                >
+                  {alimentMode === 'entree'
+                    ? 'Nombre de sacs reçus (+ Entrée)'
+                    : 'Nombre de sacs consommés (- Sortie)'}
+                </Text>
                 <TextInput
-                  style={[styles.numInput, { borderColor: '#86EFAC' }]}
+                  style={[
+                    styles.numInput,
+                    { borderColor: alimentMode === 'entree' ? '#86EFAC' : '#FCA5A5' },
+                  ]}
                   keyboardType="numeric"
                   placeholder="0"
-                  value={entrees}
-                  onChangeText={setEntrees}
+                  value={quantite}
+                  onChangeText={setQuantite}
                 />
-              </View>
+              </>
+            ) : (
+              <>
+                {/* Pour les œufs : uniquement Sortie/Vente car les Entrées viennent de Production */}
+                <View style={styles.twoCol}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.inputLabel, { color: COLORS.danger }]}>
+                      Tablettes sorties / vendues *
+                    </Text>
+                    <TextInput
+                      style={[styles.numInput, { borderColor: '#FCA5A5' }]}
+                      keyboardType="numeric"
+                      placeholder="0"
+                      value={quantite}
+                      onChangeText={setQuantite}
+                    />
+                  </View>
 
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.inputLabel, { color: COLORS.danger }]}>- Sorties</Text>
-                <TextInput
-                  style={[styles.numInput, { borderColor: '#FCA5A5' }]}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  value={sorties}
-                  onChangeText={setSorties}
-                />
-              </View>
-            </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.inputLabel, { color: COLORS.primaryDark }]}>
+                      Prix / Tablette (FCFA)
+                    </Text>
+                    <TextInput
+                      style={[styles.numInput, { borderColor: '#FCD34D' }]}
+                      keyboardType="numeric"
+                      placeholder="2200"
+                      value={prixUnitaireOeuf}
+                      onChangeText={setPrixUnitaireOeuf}
+                    />
+                  </View>
+                </View>
 
-            <Text style={styles.inputLabel}>Détail / Motif (Optionnel)</Text>
+                <TouchableOpacity
+                  style={styles.saleCheckRow}
+                  onPress={() => setIsSaleFacture(!isSaleFacture)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name={isSaleFacture ? 'checkbox' : 'square-outline'}
+                    size={21}
+                    color={COLORS.primary}
+                  />
+                  <Text style={styles.saleCheckText}>
+                    Créer automatiquement la facture ({formatFCFA(liveMontantVente)})
+                  </Text>
+                </TouchableOpacity>
+
+                {isSaleFacture && (
+                  <View style={styles.payStatusRow}>
+                    {['Payé', 'Non Payé'].map((st) => (
+                      <TouchableOpacity
+                        key={st}
+                        style={[
+                          styles.payStatusChip,
+                          statutPaiement === st && {
+                            backgroundColor: st === 'Payé' ? COLORS.secondary : COLORS.danger,
+                            borderColor: st === 'Payé' ? COLORS.secondary : COLORS.danger,
+                          },
+                        ]}
+                        onPress={() => setStatutPaiement(st)}
+                      >
+                        <Text
+                          style={[
+                            styles.payStatusChipText,
+                            statutPaiement === st && { color: '#FFFFFF' },
+                          ]}
+                        >
+                          {st}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
+
+            <Text style={styles.inputLabel}>
+              {activeType === 'oeufs' && isSaleFacture ? 'Nom du Client / Détail' : 'Détail / Motif'}
+            </Text>
             <TextInput
               style={styles.input}
-              placeholder="Ex: Livraison, Boxe 1, Boxe 2..."
+              placeholder={
+                activeType === 'aliment'
+                  ? 'Ex: Consommation Boxe 1 & 2, Livraison Sedima...'
+                  : 'Ex: Client Diop, Livraison Dakar...'
+              }
               placeholderTextColor={COLORS.textMuted}
               value={note}
               onChangeText={setNote}
@@ -265,7 +461,7 @@ export default function StockageScreen({ navigation }) {
             <View style={styles.livePreviewBox}>
               <Ionicons name="sync-circle" size={20} color="#78350F" />
               <Text style={styles.livePreviewText}>
-                Stock restant :{' '}
+                Stock restant après opération :{' '}
                 <Text style={{ fontWeight: '900' }}>
                   {formatNumber(projectedStock)} {activeType === 'aliment' ? 'sacs' : 'tablettes'}
                 </Text>
@@ -293,12 +489,16 @@ export default function StockageScreen({ navigation }) {
               {item.note ? <Text style={styles.rowNote}>{item.note}</Text> : null}
             </View>
             <View style={styles.rowMetrics}>
-              <View style={styles.badgeEntree}>
-                <Text style={styles.badgeEntreeText}>+{item.entrees}</Text>
-              </View>
-              <View style={styles.badgeSortie}>
-                <Text style={styles.badgeSortieText}>-{item.sorties}</Text>
-              </View>
+              {Number(item.entrees) > 0 && (
+                <View style={styles.badgeEntree}>
+                  <Text style={styles.badgeEntreeText}>+{item.entrees}</Text>
+                </View>
+              )}
+              {Number(item.sorties) > 0 && (
+                <View style={styles.badgeSortie}>
+                  <Text style={styles.badgeSortieText}>-{item.sorties}</Text>
+                </View>
+              )}
               <View style={styles.badgeStock}>
                 <Text style={styles.badgeStockText}>Stock: {item.stockRestant}</Text>
               </View>
@@ -375,7 +575,7 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 12,
     ...SHADOWS.medium,
   },
   summaryCol: {
@@ -388,7 +588,7 @@ const styles = StyleSheet.create({
   },
   summaryBigVal: {
     color: '#FFFFFF',
-    fontSize: 23,
+    fontSize: 20,
     fontWeight: '900',
     marginTop: 4,
   },
@@ -398,7 +598,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     alignItems: 'center',
-    minWidth: 92,
+    minWidth: 96,
   },
   stockRestantNum: {
     fontSize: 21,
@@ -410,6 +610,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#854D0E',
     marginTop: 2,
+  },
+  autoProdInfoCard: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    borderRadius: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  autoProdTitle: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#14532D',
   },
   formCard: {
     backgroundColor: '#FFFFFF',
@@ -427,7 +643,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   formTitle: {
-    fontSize: 15.5,
+    fontSize: 15,
     fontWeight: '800',
     color: COLORS.textPrimary,
   },
@@ -453,8 +669,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0FDF4',
     borderWidth: 1,
     borderColor: '#86EFAC',
-    borderRadius: 12,
-    padding: 10,
+    borderRadius: 10,
+    padding: 9,
     marginTop: 8,
   },
   alreadyAddedTitle: {
@@ -466,13 +682,43 @@ const styles = StyleSheet.create({
   alreadyAddedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     marginTop: 2,
   },
   alreadyAddedText: {
     fontSize: 12,
     fontWeight: '700',
     color: '#15803D',
+  },
+  modeSelectorRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginVertical: 4,
+  },
+  modeChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 11,
+    backgroundColor: '#FAF7F2',
+    borderWidth: 1.2,
+    borderColor: '#E7E0D3',
+  },
+  modeChipSortieActive: {
+    backgroundColor: COLORS.danger,
+    borderColor: COLORS.danger,
+  },
+  modeChipEntreeActive: {
+    backgroundColor: COLORS.secondary,
+    borderColor: COLORS.secondary,
+  },
+  modeChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
   },
   twoCol: {
     flexDirection: 'row',
@@ -481,7 +727,7 @@ const styles = StyleSheet.create({
   },
   numInput: {
     backgroundColor: '#FAF7F2',
-    borderWidth: 1.5,
+    borderWidth: 1.4,
     borderRadius: 12,
     height: 46,
     paddingHorizontal: 12,
@@ -489,61 +735,91 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.textPrimary,
   },
+  saleCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  saleCheckText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  payStatusRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  payStatusChip: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 1.2,
+    borderColor: '#D6CFC2',
+    backgroundColor: '#FAF7F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payStatusChipText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
   livePreviewBox: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
     backgroundColor: '#FEF3C7',
     borderRadius: 12,
     padding: 10,
     marginTop: 12,
-    gap: 8,
+    marginBottom: 12,
   },
   livePreviewText: {
     fontSize: 13,
     color: '#78350F',
-    fontWeight: '700',
+    fontWeight: '600',
   },
   saveBtn: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.secondary,
     height: 48,
     borderRadius: 13,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 12,
   },
   saveBtnText: {
     color: '#FFFFFF',
-    fontSize: 14.5,
+    fontSize: 15,
     fontWeight: '800',
   },
   sectionTitle: {
-    fontSize: 14.5,
+    fontSize: 15,
     fontWeight: '800',
     color: COLORS.textPrimary,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   rowCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 12,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
   rowDate: {
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: '800',
     color: COLORS.textPrimary,
   },
   rowNote: {
     fontSize: 11.5,
     color: COLORS.textSecondary,
-    marginTop: 1,
+    marginTop: 2,
   },
   rowMetrics: {
     flexDirection: 'row',
@@ -558,8 +834,8 @@ const styles = StyleSheet.create({
   },
   badgeEntreeText: {
     color: '#15803D',
-    fontSize: 12,
     fontWeight: '800',
+    fontSize: 12,
   },
   badgeSortie: {
     backgroundColor: '#FEE2E2',
@@ -569,8 +845,8 @@ const styles = StyleSheet.create({
   },
   badgeSortieText: {
     color: '#DC2626',
-    fontSize: 12,
     fontWeight: '800',
+    fontSize: 12,
   },
   badgeStock: {
     backgroundColor: '#FEF3C7',
@@ -579,8 +855,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   badgeStockText: {
-    color: '#78350F',
-    fontSize: 12,
+    color: '#92400E',
     fontWeight: '800',
+    fontSize: 12,
   },
 });

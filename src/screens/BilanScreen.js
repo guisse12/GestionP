@@ -49,10 +49,12 @@ export default function BilanScreen({ navigation }) {
   }, [navigation]);
 
   const isAdmin = user?.role === 'admin';
+  const canEditPrices = user?.role === 'admin' || user?.role === 'gerant';
   const s = summary || {};
 
   const livePrixSac = Number(prixSacInput) || 0;
   const livePrixPoussin = Number(prixPoussinInput) || 0;
+  const livePrixTablette = Number(prixTabletteInput) || 2200;
   const liveDepenseAliment = (s.totalSacsAlimentEntres || 3041) * livePrixSac;
   const liveDepensePoussins = (s.totalPouletsInitial || 8020) * livePrixPoussin;
   const liveTotalDepenses =
@@ -67,11 +69,11 @@ export default function BilanScreen({ navigation }) {
     const updated = await updateBilanYellowBoxes({
       prixSacAliment: livePrixSac,
       prixPoussin: livePrixPoussin,
-      prixTabletteDefaut: Number(prixTabletteInput) || 2200,
+      prixTabletteDefaut: livePrixTablette,
     });
     setWorkbook(updated);
     setSummary(computeFarmSummary(updated));
-    Alert.alert('Enregistré', 'Bilan mis à jour.');
+    Alert.alert('Enregistré', 'Les nouveaux prix unitaires et le Bilan ont été mis à jour.');
   };
 
   return (
@@ -100,7 +102,25 @@ export default function BilanScreen({ navigation }) {
             <View style={styles.yellowBadgeIcon}>
               <Ionicons name="pricetag" size={18} color="#713F12" />
             </View>
-            <Text style={styles.yellowSectionTitle}>Prix unitaires</Text>
+            <Text style={styles.yellowSectionTitle}>Prix unitaires (modifiables)</Text>
+          </View>
+
+          <View style={styles.yellowInputCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.yellowInputTitle}>Prix d’une tablette d’œufs</Text>
+              <Text style={styles.yellowInputDesc}>
+                Tarif actuel appliqué aux ventes & commandes
+              </Text>
+              <Text style={styles.yellowCalcResult}>{formatFCFA(livePrixTablette)} / tab.</Text>
+            </View>
+            <TextInput
+              style={styles.yellowTextInput}
+              keyboardType="numeric"
+              value={prixTabletteInput}
+              onChangeText={setPrixTabletteInput}
+              editable={canEditPrices}
+              placeholder="2200"
+            />
           </View>
 
           <View style={styles.yellowInputCard}>
@@ -116,7 +136,7 @@ export default function BilanScreen({ navigation }) {
               keyboardType="numeric"
               value={prixSacInput}
               onChangeText={setPrixSacInput}
-              editable={isAdmin}
+              editable={canEditPrices}
               placeholder="0"
             />
           </View>
@@ -134,15 +154,15 @@ export default function BilanScreen({ navigation }) {
               keyboardType="numeric"
               value={prixPoussinInput}
               onChangeText={setPrixPoussinInput}
-              editable={isAdmin}
+              editable={canEditPrices}
               placeholder="0"
             />
           </View>
 
-          {isAdmin && (
+          {canEditPrices && (
             <TouchableOpacity style={styles.saveYellowBtn} onPress={handleSaveYellowBoxes}>
               <Ionicons name="checkmark-done-circle" size={20} color="#FFFFFF" />
-              <Text style={styles.saveYellowBtnText}>Enregistrer</Text>
+              <Text style={styles.saveYellowBtnText}>Enregistrer les prix</Text>
             </TouchableOpacity>
           )}
         </View>
