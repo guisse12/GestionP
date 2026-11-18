@@ -5,10 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import NavigationLayout from '../components/NavigationLayout';
-import { COLORS, SHADOWS, formatFCFA, formatNumber } from '../theme/colors';
+import { COLORS, SHADOWS, formatFCFA } from '../theme/colors';
 import { getCachedUser, getCurrentUser } from '../services/authService';
 import { getCachedWorkbook, loadFarmWorkbook, deleteClientOrder } from '../services/farmDataService';
 
@@ -29,18 +30,43 @@ export default function ClientOrdersScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
-  const allOrders = workbook?.commandes || [];
-  const myOrders = allOrders.filter(
-    (c) =>
-      c.clientId === user?.id ||
-      String(c.clientNom || '').toLowerCase() === String(user?.nom || '').toLowerCase() ||
-      c.clientTelephone === user?.telephone
-  );
+  const cleanPhone = (p) => String(p || '').replace(/[^0-9]/g, '');
+  const userTel = cleanPhone(user?.telephone);
+  const userId = user?.id;
 
-  const allFactures = workbook?.factures || [];
-  const myFactures = allFactures.filter((f) =>
-    String(f.client || '').toLowerCase().includes(String(user?.nom || '').toLowerCase())
-  );
+  // Filtrage strict : Le client ne voit que ses PROPRES commandes
+  const allOrders = workbook?.commandes || [];
+  const myOrders = allOrders.filter((c) => {
+    if (userId && c.clientId && c.clientId === userId) return true;
+    if (userTel && c.clientTelephone && cleanPhone(c.clientTelephone) === userTel) return true;
+    return false;
+  });
+
+  const getOrderStatusConfig = (statut) => {
+    const s = String(statut || '').trim().toLowerCase();
+    if (s.includes('attente')) {
+      return {
+        label: 'En attente',
+        bg: '#FEF3C7',
+        color: '#D97706',
+        icon: 'time-outline',
+      };
+    }
+    if (s.includes('annul')) {
+      return {
+        label: 'Annulée',
+        bg: '#FEE2E2',
+        color: '#DC2626',
+        icon: 'close-circle-outline',
+      };
+    }
+    return {
+      label: 'Validée',
+      bg: '#DCFCE7',
+      color: '#15803D',
+      icon: 'checkmark-circle-outline',
+    };
+  };
 
   return (
     <NavigationLayout
@@ -50,80 +76,101 @@ export default function ClientOrdersScreen({ navigation }) {
       navigation={navigation}
     >
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+        {/* Bannière d'appel direct du gérant */}
+        <TouchableOpacity
+          style={styles.callManagerBanner}
+          onPress={() => Linking.openURL('tel:+221777527561')}
+          activeOpacity={0.85}
+        >
+          <View style={styles.callIconBox}>
+            <Ionicons name="call" size={20} color="#FFFFFF" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.callManagerTitle}>Besoin d'aide pour votre commande ?</Text>
+            <Text style={styles.callManagerSub}>Appeler le Gérant (COLY : 77 752 75 61)</Text>
+          </View>
+          <View style={styles.callActionPill}>
+            <Text style={styles.callActionText}>Appeler</Text>
+          </View>
+        </TouchableOpacity>
+
         <View style={styles.topActionRow}>
-          <Text style={styles.sectionTitle}>Commandes ({myOrders.length})</Text>
+          <Text style={styles.sectionTitle}>Mes Commandes ({myOrders.length})</Text>
           <TouchableOpacity
             style={styles.newOrderBtn}
             onPress={() => navigation.navigate('ClientHome')}
           >
             <Ionicons name="add-circle" size={18} color="#FFFFFF" />
-            <Text style={styles.newOrderBtnText}>Commander</Text>
+            <Text style={styles.newOrderBtnText}>+ Nouvelle commande</Text>
           </TouchableOpacity>
         </View>
 
         {myOrders.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Ionicons name="cart-outline" size={38} color={COLORS.primary} />
-            <Text style={styles.emptyTitle}>Aucune commande</Text>
+            <Ionicons name="cart-outline" size={44} color={COLORS.primary} />
+            <Text style={styles.emptyTitle}>Aucune commande en cours</Text>
+            <Text style={styles.emptySubtitle}>
+              Vous n'avez pas encore passé de commande. Vos commandes validées ou en attente apparaîtront ici.
+            </Text>
+            <TouchableOpacity
+              style={[styles.newOrderBtn, { marginTop: 14 }]}
+              onPress={() => navigation.navigate('ClientHome')}
+            >
+              <Ionicons name="cart" size={18} color="#FFFFFF" />
+              <Text style={styles.newOrderBtnText}>Commander maintenant</Text>
+            </TouchableOpacity>
           </View>
         ) : (
-          myOrders.map((cmd) => (
-            <View key={cmd.id} style={styles.orderCard}>
-              <View style={styles.orderHeader}>
-                <Text style={styles.orderCode}>{cmd.numeroCommande}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <View style={styles.statusPill}>
-                    <Text style={styles.statusText}>{cmd.statut}</Text>
+          myOrders.map((cmd) => {
+            const statusCfg = getOrderStatusConfig(cmd.statut);
+            const isPending = String(cmd.statut || '').toLowerCase().includes('attente');
+
+            return (
+              <View key={cmd.id} style={styles.orderCard}>
+                <View style={styles.orderHeader}>
+                  <Text style={styles.orderCode}>{cmd.numeroCommande}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={[styles.statusPill, { backgroundColor: statusCfg.bg }]}>
+                      <Ionicons
+                        name={statusCfg.icon}
+                        size={14}
+                        color={statusCfg.color}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={[styles.statusText, { color: statusCfg.color }]}>
+                        {statusCfg.label}
+                      </Text>
+                    </View>
+                    {isPending && (
+                      <TouchableOpacity
+                        onPress={async () => {
+                          const next = await deleteClientOrder(cmd.id);
+                          setWorkbook(next);
+                        }}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+                      </TouchableOpacity>
+                    )}
                   </View>
-                  <TouchableOpacity
-                    onPress={async () => {
-                      const next = await deleteClientOrder(cmd.id);
-                      setWorkbook(next);
-                    }}
-                  >
-                    <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
-                  </TouchableOpacity>
                 </View>
+
+                <Text style={styles.orderInfo}>
+                  🥚 {cmd.quantiteTablettes} tab. × {formatFCFA(cmd.prixUnitaire)}
+                </Text>
+                <Text style={styles.orderTotal}>{formatFCFA(cmd.total)}</Text>
+                <Text style={styles.orderMeta}>
+                  📅 {cmd.date} • 📍 {cmd.modeReception}
+                </Text>
+                {cmd.adresseLivraison && cmd.modeReception === 'Livraison' && (
+                  <Text style={styles.orderMeta}>🏠 {cmd.adresseLivraison}</Text>
+                )}
+                {cmd.note ? (
+                  <Text style={styles.orderNote}>💬 Note : {cmd.note}</Text>
+                ) : null}
               </View>
-              <Text style={styles.orderInfo}>
-                🥚 {cmd.quantiteTablettes} tab. × {formatFCFA(cmd.prixUnitaire)}
-              </Text>
-              <Text style={styles.orderTotal}>{formatFCFA(cmd.total)}</Text>
-              <Text style={styles.orderMeta}>
-                📅 {cmd.date} • 📍 {cmd.modeReception}
-              </Text>
-            </View>
-          ))
+            );
+          })
         )}
-
-        <Text style={[styles.sectionTitle, { marginTop: 18, marginBottom: 10 }]}>
-          Factures ({myFactures.length})
-        </Text>
-
-        {myFactures.map((f) => (
-          <View key={f.id} style={styles.factureRow}>
-            <View>
-              <Text style={styles.factureTitle}>
-                N° {f.numeroFacture} • {f.date}
-              </Text>
-              <Text style={styles.factureSub}>
-                {formatNumber(f.quantite)} tab. × {formatFCFA(f.prixUnitaire)}
-              </Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.factureAmount}>{formatFCFA(f.total)}</Text>
-              <Text
-                style={{
-                  fontSize: 11.5,
-                  fontWeight: '800',
-                  color: f.statut === 'Payé' ? COLORS.secondary : COLORS.danger,
-                }}
-              >
-                {f.statut}
-              </Text>
-            </View>
-          </View>
-        ))}
       </ScrollView>
     </NavigationLayout>
   );
@@ -132,6 +179,50 @@ export default function ClientOrdersScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { padding: 14, paddingBottom: 32 },
+  callManagerBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    gap: 12,
+    ...SHADOWS.small,
+  },
+  callIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#15803D',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callManagerTitle: {
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  callManagerSub: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803D',
+    marginTop: 2,
+  },
+  callActionPill: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  callActionText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#15803D',
+  },
   topActionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -160,16 +251,24 @@ const styles = StyleSheet.create({
   emptyCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
-    padding: 22,
+    padding: 24,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
+    ...SHADOWS.small,
   },
   emptyTitle: {
-    fontSize: 15,
+    fontSize: 15.5,
     fontWeight: '800',
     color: COLORS.textPrimary,
     marginTop: 8,
+  },
+  emptySubtitle: {
+    fontSize: 12.5,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
+    lineHeight: 18,
   },
   orderCard: {
     backgroundColor: '#FFFFFF',
@@ -192,7 +291,8 @@ const styles = StyleSheet.create({
     color: COLORS.primaryDark,
   },
   statusPill: {
-    backgroundColor: '#FEF3C7',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 10,
@@ -200,7 +300,6 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 11.5,
     fontWeight: '800',
-    color: '#B45309',
   },
   orderInfo: {
     fontSize: 13.5,
@@ -218,30 +317,10 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 4,
   },
-  factureRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  factureTitle: {
-    fontSize: 13.5,
-    fontWeight: '800',
-    color: COLORS.textPrimary,
-  },
-  factureSub: {
+  orderNote: {
     fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  factureAmount: {
-    fontSize: 14.5,
-    fontWeight: '900',
-    color: COLORS.primaryDark,
+    color: '#4B5563',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
 });

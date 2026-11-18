@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,10 +12,13 @@ import {
   SafeAreaView,
   Platform,
   StatusBar,
+  KeyboardAvoidingView,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../theme/colors';
 import { logoutUser, getCachedUser } from '../services/authService';
+import { LOGO_IMAGE_DATA_URI } from '../utils/officialStampData';
 
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(width * 0.8, 300);
@@ -61,8 +64,27 @@ export default function NavigationLayout({
 }) {
   const user = propUser || getCachedUser();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      const h = e?.endCoordinates?.height || 280;
+      setKeyboardHeight(h);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const isAdmin = user?.role === 'admin';
   const isGerant = user?.role === 'gerant';
@@ -103,8 +125,24 @@ export default function NavigationLayout({
     });
   };
 
+  useEffect(() => {
+    if (!getCachedUser() && navigation) {
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    }
+  }, [navigation]);
+
   const navigateTo = (screenName) => {
     closeDrawer(() => {
+      if (!getCachedUser()) {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
+        return;
+      }
       navigation.navigate(screenName);
     });
   };
@@ -196,9 +234,13 @@ export default function NavigationLayout({
         </TouchableOpacity>
 
         <View style={styles.headerBrandContainer}>
-          <Image source={require('../../assets/logo.png')} style={styles.headerLogo} />
+          <Image
+            source={{ uri: LOGO_IMAGE_DATA_URI }}
+            style={styles.headerLogo}
+            resizeMode="contain"
+          />
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {title || 'GestionP'}
+            {title || 'TERA AGRO - SUARL'}
           </Text>
         </View>
 
@@ -211,39 +253,56 @@ export default function NavigationLayout({
         </TouchableOpacity>
       </View>
 
-      {/* CONTENU PRINCIPAL */}
-      <View style={styles.contentContainer}>{children}</View>
+      {/* CONTENU PRINCIPAL AVEC DÉCALAGE AUTOMATIQUE DU CLAVIER (Sans écrasement sur Android) */}
+      <KeyboardAvoidingView
+        style={styles.contentContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+      >
+        {children}
+      </KeyboardAvoidingView>
 
-      {/* NAVBAR FIXE EN BAS */}
-      <View style={styles.bottomNavbar}>
-        {bottomTabs.map((tab) => {
-          const isActive = activeTab === tab.key;
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.bottomTabItem}
-              onPress={() => navigation.navigate(tab.key)}
-              activeOpacity={0.75}
-            >
-              <View style={[styles.bottomIconWrap, isActive && styles.bottomIconWrapActive]}>
-                <Ionicons
-                  name={isActive ? tab.icon : `${tab.icon}-outline`}
-                  size={21}
-                  color={isActive ? COLORS.primary : COLORS.textSecondary}
-                />
-                {tab.badge > 0 && (
-                  <View style={styles.tabBadge}>
-                    <Text style={styles.tabBadgeText}>{tab.badge}</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={[styles.bottomTabLabel, isActive && styles.bottomTabLabelActive]} numberOfLines={1}>
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* NAVBAR FIXE EN BAS (Masquée automatiquement quand le clavier est ouvert pour libérer l'écran) */}
+      {keyboardHeight === 0 && (
+        <View style={styles.bottomNavbar}>
+          {bottomTabs.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={styles.bottomTabItem}
+                onPress={() => {
+                  if (!getCachedUser()) {
+                    navigation.reset({
+                      index: 0,
+                      routes: [{ name: 'Login' }],
+                    });
+                    return;
+                  }
+                  navigation.navigate(tab.key);
+                }}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.bottomIconWrap, isActive && styles.bottomIconWrapActive]}>
+                  <Ionicons
+                    name={isActive ? tab.icon : `${tab.icon}-outline`}
+                    size={21}
+                    color={isActive ? COLORS.primary : COLORS.textSecondary}
+                  />
+                  {tab.badge > 0 && (
+                    <View style={styles.tabBadge}>
+                      <Text style={styles.tabBadgeText}>{tab.badge}</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={[styles.bottomTabLabel, isActive && styles.bottomTabLabelActive]} numberOfLines={1}>
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
       {/* MENU LATÉRAL ANIMÉ */}
       <Modal visible={drawerOpen} transparent animationType="none" onRequestClose={() => closeDrawer()}>
@@ -262,12 +321,16 @@ export default function NavigationLayout({
           >
             <View style={styles.drawerHeader}>
               <View style={styles.drawerHeaderTop}>
-                <Image source={require('../../assets/logo.png')} style={styles.drawerLogo} />
+                <Image
+                  source={{ uri: LOGO_IMAGE_DATA_URI }}
+                  style={styles.drawerLogo}
+                  resizeMode="contain"
+                />
                 <TouchableOpacity onPress={() => closeDrawer()} style={styles.closeDrawerBtn}>
                   <Ionicons name="close" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
               </View>
-              <Text style={styles.drawerUserName}>{user?.nom || 'GestionP'}</Text>
+              <Text style={styles.drawerUserName}>{user?.nom || 'TERA AGRO - SUARL'}</Text>
               <View style={[styles.rolePill, { backgroundColor: getRoleColor(user?.role) }]}>
                 <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" />
                 <Text style={styles.rolePillText}>{getRoleLabel(user?.role)}</Text>
@@ -370,12 +433,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
   },
   headerLogo: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: 10,
     borderWidth: 1.5,
     borderColor: '#FDE68A',
-    backgroundColor: '#FFFBEB',
+    backgroundColor: '#FFFFFF',
+    padding: 2,
   },
   headerTitle: {
     color: '#FFFFFF',
@@ -477,11 +541,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   drawerLogo: {
-    width: 52,
-    height: 52,
+    width: 56,
+    height: 56,
     borderRadius: 14,
     borderWidth: 2,
     borderColor: '#FBBF24',
+    backgroundColor: '#FFFFFF',
+    padding: 3,
   },
   closeDrawerBtn: {
     width: 36,

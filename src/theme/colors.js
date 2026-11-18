@@ -1,38 +1,38 @@
-// Palette de couleurs officielle GPS Poulailler
-// Inspirée de l'aviculture : Ambre doré (œufs/poussins), Terracotta (ferme), Vert émeraude (aliment/nature)
+// Palette de couleurs officielle TERA AGRO - SUARL
+// Directement inspirée du logo officiel : Vert Émeraude/Forêt (TERA & Feuilles), Or Solaire (Soleil & Arc), Brun Terre (AGRO-SUARL & Sillons)
 
 export const COLORS = {
-  // Couleurs principales
-  primary: '#B45309',        // Ambre foncé / Terracotta doré
-  primaryDark: '#78350F',    // Brun ферme profond
-  primaryLight: '#F59E0B',   // Jaune d'or vif
-  primarySoft: '#FEF3C7',    // Crème doré doux
+  // Couleurs principales (Vert TERA & Or Solaire du logo)
+  primary: '#15803D',        // Vert Émeraude TERA (Navbar, onglets actifs, boutons principaux)
+  primaryDark: '#0F4C25',    // Vert Forêt profond TERA (Bannières, en-têtes, cartes principales)
+  primaryLight: '#F59E0B',   // Jaune d'Or Solaire vif (Soleil et arc supérieur du logo)
+  primarySoft: '#DCFCE7',    // Vert tendre lumineux (Onglets actifs & badges doux)
 
-  // Couleur secondaire (Nature / Aliment / Croissance)
-  secondary: '#15803D',      // Vert émeraude ferme
+  // Couleur secondaire (Croissance / Validation / Soleil)
+  secondary: '#16A34A',      // Vert vif validation
   secondaryDark: '#14532D',  // Vert forêt profond
-  secondaryLight: '#22C55E', // Vert vif
-  secondarySoft: '#DCFCE7',  // Fond vert tendre
+  secondaryLight: '#4ADE80', // Vert feuille clair
+  secondarySoft: '#ECFCCB',  // Fond vert feuille tendre
 
-  // Accent terracotta (Poulailler / Crête de coq)
-  accent: '#C84B31',         // Rouge brique / Terracotta
-  accentSoft: '#FEE2E2',
+  // Accent Brun Terre (Couleur de "AGRO-SUARL" et des sillons de terre du logo)
+  accent: '#78350F',         // Brun Terre AGRO-SUARL
+  accentSoft: '#FEF3C7',
 
-  // Cases jaunes du Bilan (comme dans GestionP.xlsx)
-  yellowBoxBg: '#FEF08A',    // Jaune vif Excel
-  yellowBoxBorder: '#EAB308',// Bordure dorée
-  yellowBoxText: '#713F12',
+  // Cases jaunes du Bilan (Or Solaire du logo)
+  yellowBoxBg: '#FEF08A',    // Jaune solaire vif
+  yellowBoxBorder: '#F59E0B',// Bordure dorée solaire
+  yellowBoxText: '#78350F',
 
   // Fonds & Surfaces
-  background: '#FFFDF7',     // Crème ivoire très doux
+  background: '#F7FAF7',     // Crème-vert très doux et lumineux
   surface: '#FFFFFF',        // Blanc pur pour les cartes
-  surfaceElevated: '#FFFBEB',// Surface légèrement dorée
-  cardBorder: '#F3E8D2',     // Bordure chaude subtile
+  surfaceElevated: '#F0FDF4',// Surface légèrement verte
+  cardBorder: '#D8E8DC',     // Bordure verte subtile assortie au logo
 
   // Textes
-  textPrimary: '#1C1917',    // Noir chaud
-  textSecondary: '#57534E',  // Gris chaud
-  textMuted: '#A8A29E',      // Gris clair
+  textPrimary: '#14261A',    // Noir-forêt profond
+  textSecondary: '#4B5E51',  // Gris-vert sobre
+  textMuted: '#94A398',      // Gris-vert clair
   textOnPrimary: '#FFFFFF',
 
   // Statuts
@@ -48,21 +48,21 @@ export const COLORS = {
 
 export const SHADOWS = {
   small: {
-    shadowColor: '#78350F',
+    shadowColor: '#0F4C25',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.07,
     shadowRadius: 4,
     elevation: 2,
   },
   medium: {
-    shadowColor: '#78350F',
+    shadowColor: '#0F4C25',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 8,
     elevation: 4,
   },
   large: {
-    shadowColor: '#78350F',
+    shadowColor: '#0F4C25',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,
     shadowRadius: 16,

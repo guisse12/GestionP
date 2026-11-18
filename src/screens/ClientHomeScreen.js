@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TextInput,
   Alert,
   Image,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import NavigationLayout from '../components/NavigationLayout';
@@ -29,6 +30,13 @@ export default function ClientHomeScreen({ navigation }) {
   const [modeReception, setModeReception] = useState('Retrait au poulailler');
   const [adresse, setAdresse] = useState('');
   const [note, setNote] = useState('');
+  const scrollRef = useRef(null);
+
+  const scrollToOffset = (yOffset) => {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: yOffset, animated: true });
+    }, 120);
+  };
 
   const loadData = async () => {
     const u = await getCurrentUser();
@@ -60,8 +68,8 @@ export default function ClientHomeScreen({ navigation }) {
       clientTelephone: user?.telephone || '',
       adresseLivraison:
         modeReception === 'Retrait au poulailler'
-          ? 'Retrait au Poulailler'
-          : adresse || user?.adresse || 'Thiès / Dakar',
+          ? 'Retrait au Poulailler (Thiès)'
+          : adresse || user?.adresse || 'Thiès',
       modeReception,
       quantiteTablettes: qteNum,
       prixUnitaire,
@@ -89,20 +97,37 @@ export default function ClientHomeScreen({ navigation }) {
       title="Commander"
       navigation={navigation}
     >
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.container}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.productBanner}>
           <Image source={require('../../assets/logo.png')} style={styles.productImage} />
           <View style={{ flex: 1 }}>
-            <View style={styles.stockPill}>
-              <View style={styles.greenDot} />
-              <Text style={styles.stockPillText}>
-                En stock : {formatNumber(s.stockTablettesDisponibles)} tab.
-              </Text>
-            </View>
-            <Text style={styles.productTitle}>Tablette d’Œufs (30 œufs)</Text>
+            <Text style={styles.productTitle}>Tablette d’œufs</Text>
             <Text style={styles.productPrice}>{formatFCFA(prixUnitaire)}</Text>
           </View>
         </View>
+
+        <TouchableOpacity
+          style={styles.callManagerCard}
+          onPress={() => Linking.openURL('tel:+221777527561')}
+          activeOpacity={0.85}
+        >
+          <View style={styles.callIconBox}>
+            <Ionicons name="call" size={19} color="#FFFFFF" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.callManagerTitle}>Besoin d'un renseignement ?</Text>
+            <Text style={styles.callManagerSub}>Appeler le Gérant (COLY : 77 752 75 61)</Text>
+          </View>
+          <View style={styles.callActionPill}>
+            <Text style={styles.callActionText}>Appeler</Text>
+          </View>
+        </TouchableOpacity>
 
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>Quantité</Text>
@@ -135,6 +160,7 @@ export default function ClientHomeScreen({ navigation }) {
                 keyboardType="numeric"
                 value={String(quantite)}
                 onChangeText={(v) => setQuantite(v.replace(/[^0-9]/g, ''))}
+                onFocus={() => scrollToOffset(120)}
               />
               <Text style={styles.stepperUnit}>tablettes</Text>
             </View>
@@ -195,12 +221,14 @@ export default function ClientHomeScreen({ navigation }) {
 
           {modeReception === 'Livraison' && (
             <View style={{ marginTop: 10 }}>
-              <Text style={styles.inputLabel}>Adresse</Text>
+              <Text style={styles.inputLabel}>Adresse (max 25 caractères)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Lieu de livraison"
+                maxLength={25}
                 value={adresse}
-                onChangeText={setAdresse}
+                onChangeText={(txt) => setAdresse(txt.slice(0, 25))}
+                onFocus={() => scrollToOffset(280)}
               />
             </View>
           )}
@@ -211,6 +239,7 @@ export default function ClientHomeScreen({ navigation }) {
             placeholder="Message ou heure"
             value={note}
             onChangeText={setNote}
+            onFocus={() => scrollToOffset(360)}
           />
         </View>
 
@@ -254,27 +283,49 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#F59E0B',
   },
-  stockPill: {
+  callManagerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.2)',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    gap: 5,
-    marginBottom: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    gap: 12,
+    ...SHADOWS.small,
   },
-  greenDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#4ADE80',
+  callIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#15803D',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  stockPillText: {
-    color: '#86EFAC',
-    fontSize: 10.5,
+  callManagerTitle: {
+    fontSize: 13.5,
     fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  callManagerSub: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803D',
+    marginTop: 2,
+  },
+  callActionPill: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  callActionText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#15803D',
   },
   productTitle: {
     color: '#FFFFFF',

@@ -8,6 +8,8 @@ import {
   TextInput,
   Alert,
   Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import NavigationLayout, { getRoleLabel, getRoleColor } from '../components/NavigationLayout';
@@ -257,38 +259,71 @@ export default function AdminUsersScreen({ navigation }) {
 
       {/* Modal de création / modification d'un compte */}
       <Modal visible={modalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView
+            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingVertical: 20 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
               {editId ? `Modifier : ${nom}` : 'Nouvel Utilisateur'}
             </Text>
 
-            <Text style={styles.label}>Nom complet *</Text>
-            <TextInput style={styles.input} value={nom} onChangeText={setNom} />
+            <Text style={styles.label}>Nom complet * (max 25 caractères)</Text>
+            <TextInput
+              style={styles.input}
+              maxLength={25}
+              value={nom}
+              onChangeText={(txt) => setNom(txt.slice(0, 25))}
+            />
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Téléphone *</Text>
+                <Text style={styles.label}>Téléphone * (9 chiffres)</Text>
                 <TextInput
                   style={styles.input}
                   keyboardType="phone-pad"
+                  maxLength={9}
                   value={telephone}
-                  onChangeText={setTelephone}
+                  onChangeText={(txt) => setTelephone(txt.replace(/[^0-9]/g, '').slice(0, 9))}
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Mot de passe *</Text>
-                <TextInput style={styles.input} value={password} onChangeText={setPassword} />
+                <Text style={styles.label}>Mot de passe * (6-15)</Text>
+                <TextInput
+                  style={styles.input}
+                  maxLength={15}
+                  value={password}
+                  onChangeText={(txt) => setPassword(txt.slice(0, 15))}
+                />
               </View>
             </View>
 
-            <Text style={styles.label}>Poste / Fonction</Text>
-            <TextInput
-              style={styles.input}
-              value={poste}
-              onChangeText={setPoste}
-              placeholder="Ex: Responsable Boxe 1, Gérant, Client..."
-            />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Poste / Fonction</Text>
+                <TextInput
+                  style={styles.input}
+                  value={poste}
+                  onChangeText={setPoste}
+                  placeholder="Ex: Gérant, Client..."
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Adresse (max 25)</Text>
+                <TextInput
+                  style={styles.input}
+                  maxLength={25}
+                  value={adresse}
+                  onChangeText={(txt) => setAdresse(txt.slice(0, 25))}
+                  placeholder="Thiès"
+                />
+              </View>
+            </View>
 
             <Text style={styles.label}>Rôle</Text>
             <View style={styles.roleChoicesRow}>
@@ -361,8 +396,9 @@ export default function AdminUsersScreen({ navigation }) {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </Modal>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
 
       {/* Modal de confirmation de suppression directe et fiable */}
       <Modal visible={!!deleteConfirmUser} transparent animationType="fade">

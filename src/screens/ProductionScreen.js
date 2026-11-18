@@ -8,6 +8,8 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import NavigationLayout from '../components/NavigationLayout';
@@ -19,7 +21,11 @@ import {
   loadFarmWorkbook,
   computeFarmSummary,
   addDailyProduction,
+  updateProductionEntry,
+  deleteProductionEntry,
   addPouletsBoxesBatch,
+  updatePouletsBoxesBatch,
+  deletePouletsBoxesBatch,
 } from '../services/farmDataService';
 
 export default function ProductionScreen({ navigation }) {
@@ -36,7 +42,19 @@ export default function ProductionScreen({ navigation }) {
   const [boxe1Mort, setBoxe1Mort] = useState('');
   const [boxe2Mort, setBoxe2Mort] = useState('');
 
+  // Modale de modification d'un relevé de production en cas d'erreur
+  const [editProdModal, setEditProdModal] = useState(false);
+  const [editingProdRecord, setEditingProdRecord] = useState(null);
+  const [editProdDate, setEditProdDate] = useState('');
+  const [editB1Prod, setEditB1Prod] = useState('');
+  const [editB2Prod, setEditB2Prod] = useState('');
+  const [editB1Mort, setEditB1Mort] = useState('');
+  const [editB2Mort, setEditB2Mort] = useState('');
+
+  // Modale d'ajout / modification d'un lot dans Poulets_Boxes
   const [batchModal, setBatchModal] = useState(false);
+  const [editingBatch, setEditingBatch] = useState(null);
+  const [batchDate, setBatchDate] = useState(new Date().toISOString().split('T')[0]);
   const [newBoxe1, setNewBoxe1] = useState('');
   const [newBoxe2, setNewBoxe2] = useState('');
   const [newMales, setNewMales] = useState('0');
@@ -56,16 +74,15 @@ export default function ProductionScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
-  // Seuls l'employé et le gérant ont accès aux formulaires de saisie.
-  // L'administrateur voit immédiatement la supervision dès la milliseconde 0.
   const isAdmin = user?.role === 'admin';
   const canEdit = user?.role === 'employe' || user?.role === 'gerant';
+  const canModifyHistory = user?.role === 'admin' || user?.role === 'gerant' || user?.role === 'employe';
 
   const prodList = workbook?.production || [];
   const cleanDate = date.trim();
   const existingForDate = prodList.find((r) => r.date === cleanDate);
 
-  // Détails déjà ajoutés sur cette date (chaque détail déjà renseigné > 0 est verrouillé individuellement)
+  // Détails déjà ajoutés sur cette date
   const b1ProdLocked = Number(existingForDate?.boxe1Produits) > 0;
   const b2ProdLocked = Number(existingForDate?.boxe2Produits) > 0;
   const b1MortLocked = Number(existingForDate?.boxe1Mortalite) > 0;
@@ -89,7 +106,10 @@ export default function ProductionScreen({ navigation }) {
     if (!canEdit) return;
 
     if (liveBoxe1P === 0 && liveBoxe2P === 0 && liveBoxe1M === 0 && liveBoxe2M === 0) {
-      Alert.alert('Saisie requise', 'Veuillez renseigner au moins un détail (Production ou Mortalité) pour cette date.');
+      Alert.alert(
+        'Saisie requise',
+        'Veuillez renseigner au moins un détail (Production ou Mortalité) pour cette date.'
+      );
       return;
     }
 
@@ -106,7 +126,7 @@ export default function ProductionScreen({ navigation }) {
     if (updated?.alreadyExists) {
       Alert.alert(
         'Détail déjà ajouté',
-        `Ce détail (${(updated.duplicateFields || []).join(', ')}) a déjà été enregistré pour le ${cleanDate}.`
+        `Ce détail (${(updated.duplicateFields || []).join(', ')}) a déjà été enregistré pour le ${cleanDate}. Utilisez le bouton "Modifier" pour corriger en cas d’erreur.`
       );
       return;
     }
@@ -127,8 +147,90 @@ export default function ProductionScreen({ navigation }) {
     );
   };
 
-  const handleAddBatch = async () => {
-    if (!canEdit) return;
+  const openEditProdModal = (record) => {
+    setEditingProdRecord(record);
+    setEditProdDate(record.date || new Date().toISOString().split('T')[0]);
+    setEditB1Prod(String(record.boxe1Produits ?? 0));
+    setEditB2Prod(String(record.boxe2Produits ?? 0));
+    setEditB1Mort(String(record.boxe1Mortalite ?? 0));
+    setEditB2Mort(String(record.boxe2Mortalite ?? 0));
+    setEditProdModal(true);
+  };
+
+  const handleSaveEditedProduction = async () => {
+    if (!editingProdRecord) return;
+    const updated = await updateProductionEntry({
+      id: editingProdRecord.id,
+      date: editProdDate.trim(),
+      boxe1Produits: Number(editB1Prod) || 0,
+      boxe2Produits: Number(editB2Prod) || 0,
+      boxe1Mortalite: Number(editB1Mort) || 0,
+      boxe2Mortalite: Number(editB2Mort) || 0,
+      auteur: user?.nom || user?.role || '',
+    });
+
+    if (updated?.dateConflict) {
+      Alert.alert(
+        'Date déjà occupée',
+        `Une autre fiche de production existe déjà à la date ${editProdDate.trim()}.`
+      );
+      return;
+    }
+
+    setWorkbook(updated);
+    setSummary(computeFarmSummary(updated));
+    setEditProdModal(false);
+    setEditingProdRecord(null);
+    Alert.alert(
+      'Relevé corrigé ✅',
+      'La production, l’effectif vivant et le stock d’œufs ont été mis à jour automatiquement.'
+    );
+  };
+
+  const handleDeleteProduction = (record) => {
+    Alert.alert(
+      'Supprimer ce relevé ?',
+      `Relevé du ${record.date} (${record.totalProduits} tab. produites)`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            const updated = await deleteProductionEntry(record.id);
+            setWorkbook(updated);
+            setSummary(computeFarmSummary(updated));
+            if (editingProdRecord?.id === record.id) {
+              setEditProdModal(false);
+              setEditingProdRecord(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const openAddBatchModal = () => {
+    setEditingBatch(null);
+    setBatchDate(new Date().toISOString().split('T')[0]);
+    setNewBoxe1('');
+    setNewBoxe2('');
+    setNewMales('0');
+    setNewBatchNote('');
+    setBatchModal(true);
+  };
+
+  const openEditBatchModal = (batch) => {
+    setEditingBatch(batch);
+    setBatchDate(batch.date || new Date().toISOString().split('T')[0]);
+    setNewBoxe1(String(batch.boxe1 ?? 0));
+    setNewBoxe2(String(batch.boxe2 ?? 0));
+    setNewMales(String(batch.males ?? 0));
+    setNewBatchNote(batch.note || '');
+    setBatchModal(true);
+  };
+
+  const handleSaveBatch = async () => {
     const b1 = Number(newBoxe1) || 0;
     const b2 = Number(newBoxe2) || 0;
     const m = Number(newMales) || 0;
@@ -136,8 +238,26 @@ export default function ProductionScreen({ navigation }) {
       Alert.alert('Champs requis', 'Veuillez saisir le nombre de poulets.');
       return;
     }
+
+    if (editingBatch) {
+      const updated = await updatePouletsBoxesBatch({
+        id: editingBatch.id,
+        date: batchDate.trim(),
+        boxe1: b1,
+        boxe2: b2,
+        males: m,
+        note: newBatchNote,
+      });
+      setWorkbook(updated);
+      setSummary(computeFarmSummary(updated));
+      setBatchModal(false);
+      setEditingBatch(null);
+      Alert.alert('Modifié ✅', 'Le lot de poulets a été corrigé.');
+      return;
+    }
+
     const updated = await addPouletsBoxesBatch({
-      date: new Date().toISOString().split('T')[0],
+      date: batchDate.trim() || new Date().toISOString().split('T')[0],
       boxe1: b1,
       boxe2: b2,
       males: m,
@@ -146,7 +266,7 @@ export default function ProductionScreen({ navigation }) {
     });
 
     if (updated?.alreadyExists) {
-      Alert.alert('Déjà enregistré', 'Ce lot a déjà été ajouté aujourd’hui.');
+      Alert.alert('Déjà enregistré', 'Ce lot a déjà été ajouté à cette date.');
       return;
     }
 
@@ -159,7 +279,25 @@ export default function ProductionScreen({ navigation }) {
     setNewBatchNote('');
   };
 
+  const handleDeleteBatch = (batch) => {
+    Alert.alert('Supprimer ce lot ?', `Lot du ${batch.date} (${batch.total} poulets)`, [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: async () => {
+          const updated = await deletePouletsBoxesBatch(batch.id);
+          setWorkbook(updated);
+          setSummary(computeFarmSummary(updated));
+          setBatchModal(false);
+          setEditingBatch(null);
+        },
+      },
+    ]);
+  };
+
   const displayedProd = showAllHistory ? prodList : prodList.slice(0, 25);
+  const batchesList = workbook?.pouletsBoxes?.entries || [];
 
   return (
     <NavigationLayout
@@ -169,7 +307,11 @@ export default function ProductionScreen({ navigation }) {
       navigation={navigation}
       pendingOrdersCount={s.commandesEnAttente || 0}
     >
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.tabSwitch}>
           <TouchableOpacity
             style={[styles.tabBtn, subTab === 'production' && styles.tabBtnActive]}
@@ -252,13 +394,24 @@ export default function ProductionScreen({ navigation }) {
                     <Ionicons name="add-circle" size={22} color={COLORS.primary} />
                     <Text style={styles.formTitle}>Relevé du jour</Text>
                   </View>
-                  <TouchableOpacity
-                    style={styles.reportMiniBtn}
-                    onPress={() => navigation.navigate('RapportJournalier', { date: cleanDate })}
-                  >
-                    <Ionicons name="document-text" size={14} color="#FFFFFF" />
-                    <Text style={styles.reportMiniBtnText}>Rapport</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {existingForDate && (
+                      <TouchableOpacity
+                        style={styles.editCurrentDayBtn}
+                        onPress={() => openEditProdModal(existingForDate)}
+                      >
+                        <Ionicons name="create-outline" size={14} color="#78350F" />
+                        <Text style={styles.editCurrentDayBtnText}>Corriger</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={styles.reportMiniBtn}
+                      onPress={() => navigation.navigate('RapportJournalier', { date: cleanDate })}
+                    >
+                      <Ionicons name="document-text" size={14} color="#FFFFFF" />
+                      <Text style={styles.reportMiniBtnText}>Rapport</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <Text style={styles.label}>Date</Text>
@@ -266,7 +419,8 @@ export default function ProductionScreen({ navigation }) {
                   style={styles.dateInput}
                   value={date}
                   onChangeText={setDate}
-                  placeholder="2026-11-05"
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={COLORS.textMuted}
                 />
 
                 <Text style={styles.sectionSubHeader}>Production d’œufs (Tablettes)</Text>
@@ -274,12 +428,15 @@ export default function ProductionScreen({ navigation }) {
                   <View style={styles.colBox}>
                     <Text style={styles.colLabel}>Boxe 1</Text>
                     {b1ProdLocked ? (
-                      <View style={styles.lockedFieldBox}>
-                        <Ionicons name="lock-closed" size={14} color="#15803D" />
+                      <TouchableOpacity
+                        style={styles.lockedFieldBox}
+                        onPress={() => openEditProdModal(existingForDate)}
+                      >
+                        <Ionicons name="create-outline" size={14} color="#15803D" />
                         <Text style={styles.lockedFieldText}>
-                          Déjà saisi : {existingForDate.boxe1Produits}
+                          Saisi : {existingForDate.boxe1Produits} (Modifier)
                         </Text>
-                      </View>
+                      </TouchableOpacity>
                     ) : (
                       <TextInput
                         style={styles.numInput}
@@ -295,12 +452,15 @@ export default function ProductionScreen({ navigation }) {
                   <View style={styles.colBox}>
                     <Text style={styles.colLabel}>Boxe 2</Text>
                     {b2ProdLocked ? (
-                      <View style={styles.lockedFieldBox}>
-                        <Ionicons name="lock-closed" size={14} color="#15803D" />
+                      <TouchableOpacity
+                        style={styles.lockedFieldBox}
+                        onPress={() => openEditProdModal(existingForDate)}
+                      >
+                        <Ionicons name="create-outline" size={14} color="#15803D" />
                         <Text style={styles.lockedFieldText}>
-                          Déjà saisi : {existingForDate.boxe2Produits}
+                          Saisi : {existingForDate.boxe2Produits} (Modifier)
                         </Text>
-                      </View>
+                      </TouchableOpacity>
                     ) : (
                       <TextInput
                         style={styles.numInput}
@@ -327,12 +487,15 @@ export default function ProductionScreen({ navigation }) {
                   <View style={styles.colBox}>
                     <Text style={styles.colLabel}>Boxe 1 (Morts)</Text>
                     {b1MortLocked ? (
-                      <View style={styles.lockedFieldBox}>
-                        <Ionicons name="lock-closed" size={14} color="#B91C1C" />
+                      <TouchableOpacity
+                        style={styles.lockedFieldBox}
+                        onPress={() => openEditProdModal(existingForDate)}
+                      >
+                        <Ionicons name="create-outline" size={14} color="#B91C1C" />
                         <Text style={[styles.lockedFieldText, { color: '#B91C1C' }]}>
-                          Déjà saisi : {existingForDate.boxe1Mortalite}
+                          Saisi : {existingForDate.boxe1Mortalite} (Modifier)
                         </Text>
-                      </View>
+                      </TouchableOpacity>
                     ) : (
                       <TextInput
                         style={[styles.numInput, { borderColor: '#FCA5A5' }]}
@@ -348,12 +511,15 @@ export default function ProductionScreen({ navigation }) {
                   <View style={styles.colBox}>
                     <Text style={styles.colLabel}>Boxe 2 (Morts)</Text>
                     {b2MortLocked ? (
-                      <View style={styles.lockedFieldBox}>
-                        <Ionicons name="lock-closed" size={14} color="#B91C1C" />
+                      <TouchableOpacity
+                        style={styles.lockedFieldBox}
+                        onPress={() => openEditProdModal(existingForDate)}
+                      >
+                        <Ionicons name="create-outline" size={14} color="#B91C1C" />
                         <Text style={[styles.lockedFieldText, { color: '#B91C1C' }]}>
-                          Déjà saisi : {existingForDate.boxe2Mortalite}
+                          Saisi : {existingForDate.boxe2Mortalite} (Modifier)
                         </Text>
-                      </View>
+                      </TouchableOpacity>
                     ) : (
                       <TextInput
                         style={[styles.numInput, { borderColor: '#FCA5A5' }]}
@@ -397,25 +563,40 @@ export default function ProductionScreen({ navigation }) {
             </View>
 
             {displayedProd.map((row) => (
-              <TouchableOpacity
-                key={row.id}
-                style={styles.prodRowCard}
-                activeOpacity={0.85}
-                onPress={() => navigation.navigate('RapportJournalier', { date: row.date })}
-              >
+              <View key={row.id} style={styles.prodRowCard}>
                 <View style={styles.prodRowTop}>
-                  <View style={styles.datePill}>
+                  <TouchableOpacity
+                    style={styles.datePill}
+                    onPress={() => navigation.navigate('RapportJournalier', { date: row.date })}
+                  >
                     <Ionicons name="calendar-outline" size={14} color={COLORS.primaryDark} />
                     <Text style={styles.datePillText}>{row.date}</Text>
-                  </View>
-                  <View style={styles.totalProdBadge}>
-                    <Text style={styles.totalProdBadgeText}>
-                      +{formatNumber(row.totalProduits)} tab.
-                    </Text>
+                  </TouchableOpacity>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={styles.totalProdBadge}>
+                      <Text style={styles.totalProdBadgeText}>
+                        +{formatNumber(row.totalProduits)} tab.
+                      </Text>
+                    </View>
+
+                    {canModifyHistory && (
+                      <TouchableOpacity
+                        style={styles.rowEditBtn}
+                        onPress={() => openEditProdModal(row)}
+                      >
+                        <Ionicons name="create-outline" size={15} color="#78350F" />
+                        <Text style={styles.rowEditBtnText}>Modifier</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
 
-                <View style={styles.prodMetricsGrid}>
+                <TouchableOpacity
+                  style={styles.prodMetricsGrid}
+                  activeOpacity={0.85}
+                  onPress={() => navigation.navigate('RapportJournalier', { date: row.date })}
+                >
                   <View style={styles.metricMini}>
                     <Text style={styles.metricMiniLbl}>Boxe 1</Text>
                     <Text style={styles.metricMiniVal}>{row.boxe1Produits} tab.</Text>
@@ -441,8 +622,8 @@ export default function ProductionScreen({ navigation }) {
                       {formatNumber(row.restantVivant || s.vivantsTotal)}
                     </Text>
                   </View>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+              </View>
             ))}
           </>
         ) : (
@@ -493,56 +674,234 @@ export default function ProductionScreen({ navigation }) {
                 </View>
               </View>
 
-              {user?.role === 'gerant' && (
+              {(user?.role === 'gerant' || user?.role === 'admin') && (
                 <TouchableOpacity
                   style={styles.addBatchBtn}
-                  onPress={() => setBatchModal(true)}
+                  onPress={openAddBatchModal}
                 >
                   <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
                   <Text style={styles.addBatchBtnText}>Ajouter un lot</Text>
                 </TouchableOpacity>
+              )}
+
+              {batchesList.length > 0 && (
+                <View style={{ marginTop: 14 }}>
+                  <Text style={[styles.boxesCardTitle, { fontSize: 14, marginBottom: 8 }]}>
+                    Lots enregistrés ({batchesList.length})
+                  </Text>
+                  {batchesList.map((batch) => (
+                    <View key={batch.id} style={styles.batchItemRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.batchItemTitle}>
+                          {batch.date || 'Lot initial'} • Total : {formatNumber(batch.total || (Number(batch.boxe1) || 0) + (Number(batch.boxe2) || 0) + (Number(batch.males) || 0))}
+                        </Text>
+                        <Text style={styles.batchItemSub}>
+                          Boxe 1 : {batch.boxe1} • Boxe 2 : {batch.boxe2} • Mâles : {batch.males || 0}
+                        </Text>
+                      </View>
+                      {canModifyHistory && (
+                        <TouchableOpacity
+                          style={styles.rowEditBtn}
+                          onPress={() => openEditBatchModal(batch)}
+                        >
+                          <Ionicons name="create-outline" size={15} color="#78350F" />
+                          <Text style={styles.rowEditBtnText}>Modifier</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                </View>
               )}
             </View>
           </View>
         )}
       </ScrollView>
 
-      <Modal visible={batchModal} transparent animationType="slide">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Nouveau lot</Text>
-            <Text style={styles.colLabel}>Boxe 1</Text>
-            <TextInput
-              style={styles.numInput}
-              keyboardType="numeric"
-              placeholder="0"
-              value={newBoxe1}
-              onChangeText={setNewBoxe1}
-            />
-            <Text style={[styles.colLabel, { marginTop: 10 }]}>Boxe 2</Text>
-            <TextInput
-              style={styles.numInput}
-              keyboardType="numeric"
-              placeholder="0"
-              value={newBoxe2}
-              onChangeText={setNewBoxe2}
-            />
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-              <TouchableOpacity
-                style={[styles.saveButton, { flex: 1, backgroundColor: '#78716C', marginTop: 0 }]}
-                onPress={() => setBatchModal(false)}
-              >
-                <Text style={styles.saveButtonText}>Annuler</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, { flex: 1, marginTop: 0 }]}
-                onPress={handleAddBatch}
-              >
-                <Text style={styles.saveButtonText}>Ajouter</Text>
-              </TouchableOpacity>
+      {/* Modale de modification d'un relevé de production en cas d'erreur */}
+      <Modal visible={editProdModal} transparent animationType="slide">
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView
+            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.modalBox}>
+              <View style={styles.modalHeaderRow}>
+                <Text style={styles.modalTitle}>Modifier le relevé</Text>
+                <TouchableOpacity onPress={() => setEditProdModal(false)}>
+                  <Ionicons name="close-circle" size={24} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.colLabel}>Date</Text>
+              <TextInput
+                style={styles.dateInput}
+                value={editProdDate}
+                onChangeText={setEditProdDate}
+              />
+
+              <Text style={styles.sectionSubHeader}>Production d’œufs (Tablettes)</Text>
+              <View style={styles.twoColRow}>
+                <View style={styles.colBox}>
+                  <Text style={styles.colLabel}>Boxe 1</Text>
+                  <TextInput
+                    style={styles.numInput}
+                    keyboardType="numeric"
+                    value={editB1Prod}
+                    onChangeText={setEditB1Prod}
+                  />
+                </View>
+                <View style={styles.colBox}>
+                  <Text style={styles.colLabel}>Boxe 2</Text>
+                  <TextInput
+                    style={styles.numInput}
+                    keyboardType="numeric"
+                    value={editB2Prod}
+                    onChangeText={setEditB2Prod}
+                  />
+                </View>
+              </View>
+
+              <Text style={styles.sectionSubHeader}>Mortalité par Boxe</Text>
+              <View style={styles.twoColRow}>
+                <View style={styles.colBox}>
+                  <Text style={styles.colLabel}>Boxe 1 (Morts)</Text>
+                  <TextInput
+                    style={[styles.numInput, { borderColor: '#FCA5A5' }]}
+                    keyboardType="numeric"
+                    value={editB1Mort}
+                    onChangeText={setEditB1Mort}
+                  />
+                </View>
+                <View style={styles.colBox}>
+                  <Text style={styles.colLabel}>Boxe 2 (Morts)</Text>
+                  <TextInput
+                    style={[styles.numInput, { borderColor: '#FCA5A5' }]}
+                    keyboardType="numeric"
+                    value={editB2Mort}
+                    onChangeText={setEditB2Mort}
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+                {editingProdRecord && (
+                  <TouchableOpacity
+                    style={[styles.saveButton, { flex: 0.8, backgroundColor: '#FEE2E2', marginTop: 0 }]}
+                    onPress={() => handleDeleteProduction(editingProdRecord)}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.saveButton, { flex: 1, backgroundColor: '#78716C', marginTop: 0 }]}
+                  onPress={() => setEditProdModal(false)}
+                >
+                  <Text style={styles.saveButtonText}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveButton, { flex: 1.3, marginTop: 0 }]}
+                  onPress={handleSaveEditedProduction}
+                >
+                  <Text style={styles.saveButtonText}>Enregistrer</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Modale d'ajout / modification d'un lot dans Poulets_Boxes */}
+      <Modal visible={batchModal} transparent animationType="slide">
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView
+            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.modalBox}>
+              <View style={styles.modalHeaderRow}>
+                <Text style={styles.modalTitle}>
+                  {editingBatch ? 'Modifier le lot' : 'Nouveau lot'}
+                </Text>
+                <TouchableOpacity onPress={() => setBatchModal(false)}>
+                  <Ionicons name="close-circle" size={24} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.colLabel}>Date</Text>
+              <TextInput
+                style={styles.dateInput}
+                value={batchDate}
+                onChangeText={setBatchDate}
+              />
+
+              <View style={styles.twoColRow}>
+                <View style={styles.colBox}>
+                  <Text style={styles.colLabel}>Boxe 1</Text>
+                  <TextInput
+                    style={styles.numInput}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={newBoxe1}
+                    onChangeText={setNewBoxe1}
+                  />
+                </View>
+                <View style={styles.colBox}>
+                  <Text style={styles.colLabel}>Boxe 2</Text>
+                  <TextInput
+                    style={styles.numInput}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={newBoxe2}
+                    onChangeText={setNewBoxe2}
+                  />
+                </View>
+              </View>
+
+              <Text style={styles.colLabel}>Mâles</Text>
+              <TextInput
+                style={styles.numInput}
+                keyboardType="numeric"
+                placeholder="0"
+                placeholderTextColor={COLORS.textMuted}
+                value={newMales}
+                onChangeText={setNewMales}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                {editingBatch && batchesList.length > 1 && (
+                  <TouchableOpacity
+                    style={[styles.saveButton, { flex: 0.7, backgroundColor: '#FEE2E2', marginTop: 0 }]}
+                    onPress={() => handleDeleteBatch(editingBatch)}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.saveButton, { flex: 1, backgroundColor: '#78716C', marginTop: 0 }]}
+                  onPress={() => setBatchModal(false)}
+                >
+                  <Text style={styles.saveButtonText}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveButton, { flex: 1.2, marginTop: 0 }]}
+                  onPress={handleSaveBatch}
+                >
+                  <Text style={styles.saveButtonText}>
+                    {editingBatch ? 'Enregistrer' : 'Ajouter'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
     </NavigationLayout>
   );
@@ -603,6 +962,22 @@ const styles = StyleSheet.create({
   },
   reportMiniBtnText: {
     color: '#FFFFFF',
+    fontSize: 11.5,
+    fontWeight: '800',
+  },
+  editCurrentDayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 9,
+    gap: 4,
+  },
+  editCurrentDayBtnText: {
+    color: '#78350F',
     fontSize: 11.5,
     fontWeight: '800',
   },
@@ -718,7 +1093,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   lockedFieldText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '800',
     color: '#15803D',
   },
@@ -825,6 +1200,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#92400E',
   },
+  rowEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  rowEditBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#78350F',
+  },
   prodMetricsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -910,6 +1301,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
+  batchItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FAF7F2',
+    borderRadius: 12,
+    padding: 11,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#E7E0D3',
+  },
+  batchItemTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  batchItemSub: {
+    fontSize: 11.5,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -921,10 +1333,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
   },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   modalTitle: {
     fontSize: 17,
     fontWeight: '900',
     color: COLORS.textPrimary,
-    marginBottom: 12,
   },
 });

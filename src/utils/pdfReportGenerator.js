@@ -1,6 +1,7 @@
 import { Platform, Share, Alert } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { formatFCFA, formatNumber } from '../theme/colors';
+import { suppressAutoLock } from '../services/authService';
 
 const sanitizePdfText = (str) => {
   return String(str || '')
@@ -64,7 +65,7 @@ export const getReportPdfFileName = (report) => {
   const safeSlug = String(report?.periodLabel || report?.date || 'Rapport')
     .replace(/[^a-zA-Z0-9_-]/g, '_')
     .replace(/_+/g, '_');
-  return `Rapport_GestionP_${safeSlug}.pdf`;
+  return `Rapport_TERA_AGRO_${safeSlug}.pdf`;
 };
 
 // Générateur PDF 1.4 A4 autonome (aucune dépendance native requise)
@@ -85,8 +86,8 @@ export const generateRawPdfBase64 = (report, summary = {}) => {
   };
 
   // En-tête A4 (595 x 842 pt)
-  rectFill(0, 756, 595, 86, 0.49, 0.18, 0.07); // Brun doré foncé (#7C2D12)
-  textAt(36, 808, 'F2', 20, 1, 0.98, 0.92, 'GestionP - Ferme Avicole');
+  rectFill(0, 756, 595, 86, 0.06, 0.30, 0.15); // Vert Forêt TERA (#0F4C25)
+  textAt(36, 808, 'F2', 20, 1, 0.98, 0.92, 'TERA AGRO - SUARL (Poulailler de Thies)');
   textAt(36, 786, 'F2', 13, 0.99, 0.9, 0.54, report.periodTitle || "Rapport d'Activite");
   textAt(
     36,
@@ -163,6 +164,15 @@ export const generateRawPdfBase64 = (report, summary = {}) => {
 
   // 3. Ventes & Factures
   drawSectionHeader('3. VENTES, FACTURATION & TRESORERIE');
+  drawKeyValRow('Prix unitaire tablette(s) :', `${report.prixUnitaireLabel || formatFCFA(s.prixTabletteDefaut || 2200)}`, true);
+  if (report.prixUnitairesDetails && report.prixUnitairesDetails.length > 1) {
+    for (const d of report.prixUnitairesDetails) {
+      drawKeyValRow(
+        `  - Tarif ${formatFCFA(d.prixUnitaire)} / tab. (${d.count} fact.) :`,
+        `${formatNumber(d.quantite)} tab. = ${formatFCFA(d.total)}`
+      );
+    }
+  }
   drawKeyValRow('Nombre de factures sur la periode :', `${report.facturesRows.length} facture(s)`);
   drawKeyValRow('Tablettes vendues / facturees :', `${formatNumber(report.tablettesFactureesJour)} tablettes`);
   drawKeyValRow('Ventes Payees (Encaissees) :', `${formatFCFA(report.ventesPayeesJour)}`, true);
@@ -172,16 +182,26 @@ export const generateRawPdfBase64 = (report, summary = {}) => {
   // 4. Dépenses
   drawSectionHeader('4. DEPENSES & CHARGES DE LA PERIODE');
   drawKeyValRow('Autres achats et charges :', `${formatFCFA(report.totalAutresJour)} (${report.autresRows.length})`);
+  drawKeyValRow(
+    'Versements Aliment :',
+    `${formatFCFA(report.totalVersementsAlimentJour || 0)} (${(report.versementsAlimentRows || []).length})`
+  );
+  drawKeyValRow(
+    'Entretien :',
+    `${formatFCFA(report.totalEntretiensJour || 0)} (${(report.entretiensRows || []).length})`
+  );
   drawKeyValRow('Constructions et amenagements :', `${formatFCFA(report.totalConstJour)} (${report.constRows.length})`);
   drawKeyValRow('Total des depenses de la periode :', `${formatFCFA(report.totalDepensesJour)}`, true);
   drawKeyValRow('SOLDE NET DE LA PERIODE :', `${formatFCFA(report.soldeNetJour)}`, true);
   y -= 8;
 
-  // 5. Détail par jour (Semaine) ou par mois (Annuel) ou dernières lignes
+  // 5. Détail par jour (Semaine / Mensuel) ou par mois (Annuel) ou dernières lignes
   if (report.breakdownRows && report.breakdownRows.length > 0 && y > 130) {
     drawSectionHeader(
       report.periodType === 'week'
         ? '5. RECAPITULATIF DETAILLE DES 7 JOURS DE LA SEMAINE'
+        : report.periodType === 'month'
+        ? '5. RECAPITULATIF JOURNALIER DU MOIS'
         : "5. RECAPITULATIF MENSUEL DE L'ANNEE"
     );
     textAt(44, y, 'F2', 9, 0.35, 0.35, 0.35, 'Periode');
@@ -205,7 +225,7 @@ export const generateRawPdfBase64 = (report, summary = {}) => {
     for (const f of report.facturesRows.slice(0, 8)) {
       if (y < 60) break;
       drawKeyValRow(
-        `${f.client} (Facture N°${f.numeroFacture} - ${f.quantite} tab.)`,
+        `${f.client} (N°${f.numeroFacture} - ${f.quantite} tab. x ${formatFCFA(f.prixUnitaire)})`,
         `${formatFCFA(f.total)} [${f.statut}]`
       );
     }
@@ -221,7 +241,7 @@ export const generateRawPdfBase64 = (report, summary = {}) => {
     0.4,
     0.4,
     0.4,
-    `Document officiel genere par l'application GestionP  -  Bilan global ferme : ${formatFCFA(s.soldeNet)}`
+    `Document officiel genere par l'application TERA AGRO - SUARL  -  Bilan global ferme : ${formatFCFA(s.soldeNet)}`
   );
 
   const streamContent = ops.join('\n');
@@ -266,15 +286,18 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
         <div class="section-title">${
           report.periodType === 'week'
             ? '5. RÉCAPITULATIF PAR JOUR (7 JOURS)'
+            : report.periodType === 'month'
+            ? `5. RÉCAPITULATIF JOURNALIER DU MOIS (${report.periodLabel})`
             : '5. RÉCAPITULATIF MENSUEL DE L’ANNÉE'
         }</div>
         <table>
           <thead>
             <tr>
-              <th>${report.periodType === 'week' ? 'Date' : 'Mois'}</th>
+              <th>${report.periodType === 'year' ? 'Mois' : 'Date'}</th>
               <th>Production</th>
               <th>Mortalité</th>
               <th>Aliment</th>
+              <th>Prix Unitaire Tab.</th>
               <th>Ventes Payées</th>
               <th>Dépenses</th>
               <th>Solde Net</th>
@@ -289,6 +312,7 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
                 <td>${formatNumber(r.totalProduits)} tab.</td>
                 <td>${r.totalMortalite}</td>
                 <td>${formatNumber(r.consoAliment)} sacs</td>
+                <td><strong>${r.prixUnitaireLabel || formatFCFA(report.prixTabletteDefaut || 2200)}</strong></td>
                 <td class="pos">${formatFCFA(r.ventesPayees)}</td>
                 <td class="neg">${formatFCFA(r.depenses)}</td>
                 <td><strong>${formatFCFA(r.solde)}</strong></td>
@@ -339,10 +363,19 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
       : '';
 
   const depensesHtml =
-    report.autresRows.length + report.constRows.length > 0
+    report.autresRows.length +
+      (report.versementsAlimentRows?.length || 0) +
+      (report.entretiensRows?.length || 0) +
+      report.constRows.length >
+    0
       ? `
       <div class="section">
-        <div class="section-title">DÉTAIL DES DÉPENSES (${report.autresRows.length + report.constRows.length})</div>
+        <div class="section-title">DÉTAIL DES DÉPENSES (${
+          report.autresRows.length +
+          (report.versementsAlimentRows?.length || 0) +
+          (report.entretiensRows?.length || 0) +
+          report.constRows.length
+        })</div>
         <table>
           <thead>
             <tr>
@@ -353,6 +386,30 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
             </tr>
           </thead>
           <tbody>
+            ${(report.versementsAlimentRows || [])
+              .slice(0, 35)
+              .map(
+                (v) => `
+              <tr>
+                <td>${v.date}</td>
+                <td>Versement Aliment</td>
+                <td>${v.designation || v.produit}</td>
+                <td class="neg"><strong>${formatFCFA(v.montant)}</strong></td>
+              </tr>`
+              )
+              .join('')}
+            ${(report.entretiensRows || [])
+              .slice(0, 35)
+              .map(
+                (e) => `
+              <tr>
+                <td>${e.date}</td>
+                <td>Entretien</td>
+                <td>${e.designation || e.produit}</td>
+                <td class="neg"><strong>${formatFCFA(e.montant)}</strong></td>
+              </tr>`
+              )
+              .join('')}
             ${report.autresRows
               .slice(0, 35)
               .map(
@@ -392,16 +449,16 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
     body { margin: 0; padding: 14px; background: #F5EFE6; color: #1C1917; }
     .page { max-width: 800px; margin: 0 auto; background: #FFFFFF; border-radius: 14px; padding: 20px; box-shadow: 0 4px 18px rgba(0,0,0,0.08); }
-    .banner { background: #7C2D12; color: #FFFFFF; padding: 18px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .banner { background: #0F4C25; color: #FFFFFF; padding: 18px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 3px solid #F59E0B; }
     .banner h1 { margin: 0; font-size: 20px; color: #FEF3C7; }
     .banner h2 { margin: 4px 0 0 0; font-size: 14px; font-weight: 700; color: #FFFFFF; }
-    .badge { background: #F59E0B; color: #7C2D12; padding: 6px 10px; border-radius: 8px; font-weight: 900; font-size: 11px; }
+    .badge { background: #F59E0B; color: #0F4C25; padding: 6px 10px; border-radius: 8px; font-weight: 900; font-size: 11px; }
     .kpi-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
-    .kpi-card { flex: 1; min-width: 135px; padding: 12px; border-radius: 10px; border: 1px solid #E7E0D3; background: #FAF7F2; }
-    .kpi-label { font-size: 10px; font-weight: 800; color: #78716C; text-transform: uppercase; }
-    .kpi-val { font-size: 16px; font-weight: 900; color: #7C2D12; margin-top: 4px; }
+    .kpi-card { flex: 1; min-width: 135px; padding: 12px; border-radius: 10px; border: 1px solid #D8E8DC; background: #F7FAF7; }
+    .kpi-label { font-size: 10px; font-weight: 800; color: #4B5E51; text-transform: uppercase; }
+    .kpi-val { font-size: 16px; font-weight: 900; color: #0F4C25; margin-top: 4px; }
     .section { margin-bottom: 16px; }
-    .section-title { background: #F5EFE6; color: #7C2D12; padding: 8px 12px; border-radius: 8px; font-weight: 900; font-size: 12.5px; margin-bottom: 8px; border-left: 4px solid #C84B31; }
+    .section-title { background: #ECFCCB; color: #0F4C25; padding: 8px 12px; border-radius: 8px; font-weight: 900; font-size: 12.5px; margin-bottom: 8px; border-left: 4px solid #15803D; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { border: 1px solid #E7E0D3; padding: 7px 8px; text-align: left; }
     th { background: #FAF7F2; color: #57534E; font-weight: 800; }
@@ -444,7 +501,7 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
     }
     <div class="banner">
       <div>
-        <h1>GestionP — Ferme Avicole</h1>
+        <h1>TERA AGRO - SUARL — Poulailler de Thiès</h1>
         <h2>${report.periodTitle}</h2>
       </div>
       <div class="badge">${report.periodBadge}</div>
@@ -536,20 +593,51 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
       <table>
         <tbody>
           <tr>
-            <th>Tablettes Facturées</th>
-            <td>${formatNumber(report.tablettesFactureesJour)} tab. (${report.facturesRows.length} factures)</td>
+            <th>Prix Unitaire Tablette(s)</th>
+            <td><strong>${report.prixUnitaireLabel || formatFCFA(s.prixTabletteDefaut || 2200)}</strong></td>
             <th>Autres Achats & Charges</th>
             <td class="neg">${formatFCFA(report.totalAutresJour)}</td>
+          </tr>
+          ${
+            report.prixUnitairesDetails && report.prixUnitairesDetails.length > 1
+              ? `<tr>
+                  <th>Détail par Prix Unitaire</th>
+                  <td colspan="3">
+                    ${report.prixUnitairesDetails
+                      .map(
+                        (d) =>
+                          `<strong>${formatNumber(d.quantite)} tab.</strong> × ${formatFCFA(
+                            d.prixUnitaire
+                          )} = <strong>${formatFCFA(d.total)}</strong> (${d.count} fact.)`
+                      )
+                      .join(' &nbsp;|&nbsp; ')}
+                  </td>
+                </tr>`
+              : ''
+          }
+          <tr>
+            <th>Tablettes Facturées</th>
+            <td>${formatNumber(report.tablettesFactureesJour)} tab. (${report.facturesRows.length} factures)</td>
+            <th>Dépenses Aliment</th>
+            <td class="neg">${formatFCFA(report.totalVersementsAlimentJour || 0)}</td>
           </tr>
           <tr>
             <th>Ventes Payées</th>
             <td class="pos"><strong>${formatFCFA(report.ventesPayeesJour)}</strong></td>
-            <th>Constructions</th>
-            <td class="neg">${formatFCFA(report.totalConstJour)}</td>
+            <th>Entretien</th>
+            <td class="neg">${formatFCFA(report.totalEntretiensJour || 0)}</td>
           </tr>
           <tr>
             <th>Ventes Non Payées</th>
             <td class="neg">${formatFCFA(report.ventesNonPayeesJour)}</td>
+            <th>Constructions</th>
+            <td class="neg">${formatFCFA(report.totalConstJour || 0)}</td>
+          </tr>
+          <tr>
+            <th>Solde Net Période</th>
+            <td class="${report.soldeNetJour >= 0 ? 'pos' : 'neg'}"><strong>${formatFCFA(
+    report.soldeNetJour
+  )}</strong></td>
             <th>Total Dépenses Période</th>
             <td class="neg"><strong>${formatFCFA(report.totalDepensesJour)}</strong></td>
           </tr>
@@ -562,7 +650,7 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
     ${depensesHtml}
 
     <div class="footer">
-      <span>Document officiel généré par GestionP</span>
+      <span>Document officiel généré par TERA AGRO - SUARL</span>
       <span>Bilan Global Net Ferme : <strong>${formatFCFA(s.soldeNet)}</strong></span>
     </div>
   </div>
@@ -572,6 +660,7 @@ export const generatePdfHtml = (report, summary = {}, options = {}) => {
 
 // ACTION 1 : Enregistrer / Télécharger directement le fichier .PDF sur le téléphone
 export const savePdfToDevice = async (report, summary) => {
+  suppressAutoLock(45000);
   const fileName = getReportPdfFileName(report);
   const cleanHtml = generatePdfHtml(report, summary, { showInteractiveButtons: false });
   let pdfBase64 = generateRawPdfBase64(report, summary);
@@ -686,6 +775,7 @@ export const savePdfToDevice = async (report, summary) => {
 
 // ACTION 2 : Imprimer / Enregistrer en PDF via le gestionnaire d'impression système Android/iOS
 export const printPdfReport = async (report, summary) => {
+  suppressAutoLock(45000);
   const cleanHtml = generatePdfHtml(report, summary, { showInteractiveButtons: false });
   const NativePrint = getNativePrintModule();
 

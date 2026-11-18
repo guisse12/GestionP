@@ -15,11 +15,18 @@ import {
   StatusBar,
   Animated,
   Easing,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../theme/colors';
-import { loginWithPhoneAndPassword, getCurrentUser } from '../services/authService';
+import {
+  loginWithPhoneAndPassword,
+  getCurrentUser,
+  getLastLoginPhone,
+  consumeSessionLockedReason,
+} from '../services/authService';
 import { loadFarmWorkbook } from '../services/farmDataService';
+import { LOGO_IMAGE_DATA_URI } from '../utils/officialStampData';
 
 // Configuration des 2 tablettes d'œufs (Gauche et Droite du logo fixe)
 // Chaque alvéole reçoit un œuf qui tombe du haut et se pose dans la tablette
@@ -49,6 +56,27 @@ export default function LoginScreen({ navigation }) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const scrollRef = useRef(null);
+
+  const scrollToOffset = (yOffset) => {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: yOffset, animated: true });
+    }, 120);
+  };
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e?.endCoordinates?.height || 260);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Animations des 12 œufs qui tombent verticalement dans les alvéoles des tablettes
   // (Le logo central reste 100% fixe, sans flottement)
@@ -58,15 +86,37 @@ export default function LoginScreen({ navigation }) {
     // Précharger les données du classeur en mémoire dès l'ouverture
     loadFarmWorkbook();
 
-    (async () => {
+    const initAuthScreen = async () => {
+      const reason = consumeSessionLockedReason();
+      if (reason) {
+        setPassword('');
+      }
+
+      const lastPhone = await getLastLoginPhone();
+      if (lastPhone) {
+        setTelephone((prev) => prev || lastPhone);
+      } else {
+        setTelephone('');
+      }
+
       const user = await getCurrentUser();
-      if (user && user.statut === 'valide') {
+      if (user && user.statut === 'valide' && !reason) {
         redirectByRole(user);
       } else {
         setCheckingSession(false);
       }
-    })();
-  }, []);
+    };
+
+    initAuthScreen();
+
+    const unsubscribeFocus = navigation.addListener('focus', () => {
+      initAuthScreen();
+    });
+
+    return () => {
+      if (unsubscribeFocus) unsubscribeFocus();
+    };
+  }, [navigation]);
 
   useEffect(() => {
     const loops = fallAnims.map((anim, idx) => {
@@ -183,7 +233,11 @@ export default function LoginScreen({ navigation }) {
   if (checkingSession) {
     return (
       <View style={styles.splashLoader}>
-        <Image source={require('../../assets/logo.png')} style={styles.splashLogo} />
+        <Image
+          source={{ uri: LOGO_IMAGE_DATA_URI }}
+          style={styles.splashLogo}
+          resizeMode="contain"
+        />
         <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 14 }} />
       </View>
     );
@@ -196,7 +250,15 @@ export default function LoginScreen({ navigation }) {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: keyboardHeight > 0 ? 90 : 36 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.heroBanner}>
             {/* Scène d'en-tête : Tablette Gauche + Logo Officiel 100% Fixe + Tablette Droite */}
             <View style={styles.headerStageRow}>
@@ -207,7 +269,11 @@ export default function LoginScreen({ navigation }) {
               <View style={styles.logoCenterWrap}>
                 <View style={styles.logoStaticHalo} />
                 <View style={styles.logoBadge}>
-                  <Image source={require('../../assets/logo.png')} style={styles.logoImage} />
+                  <Image
+                    source={{ uri: LOGO_IMAGE_DATA_URI }}
+                    style={styles.logoImage}
+                    resizeMode="contain"
+                  />
                 </View>
               </View>
 
@@ -215,7 +281,7 @@ export default function LoginScreen({ navigation }) {
               {renderEggTray(TRAY_SLOTS_RIGHT, TRAY_SLOTS_LEFT.length)}
             </View>
 
-            <Text style={styles.appTitle}>Bienvenue sur GestionP</Text>
+            <Text style={styles.appTitle}>TERA AGRO - SUARL</Text>
           </View>
 
           <View style={styles.card}>
@@ -226,11 +292,13 @@ export default function LoginScreen({ navigation }) {
               </View>
               <TextInput
                 style={styles.input}
-                placeholder="Votre numéro"
+                placeholder="Votre numéro (9 chiffres)"
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="phone-pad"
+                maxLength={9}
                 value={telephone}
-                onChangeText={setTelephone}
+                onChangeText={(txt) => setTelephone(txt.replace(/[^0-9]/g, '').slice(0, 9))}
+                onFocus={() => scrollToOffset(110)}
               />
               {telephone.length > 0 && (
                 <TouchableOpacity onPress={() => setTelephone('')} style={{ padding: 6 }}>
@@ -239,7 +307,7 @@ export default function LoginScreen({ navigation }) {
               )}
             </View>
 
-            <Text style={styles.inputLabel}>Mot de passe</Text>
+            <Text style={styles.inputLabel}>Mot de passe (6 à 15 caractères)</Text>
             <View style={styles.inputContainer}>
               <Ionicons
                 name="lock-closed-outline"
@@ -252,8 +320,10 @@ export default function LoginScreen({ navigation }) {
                 placeholder="••••••••"
                 placeholderTextColor={COLORS.textMuted}
                 secureTextEntry={!showPassword}
+                maxLength={15}
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(txt) => setPassword(txt.slice(0, 15))}
+                onFocus={() => scrollToOffset(200)}
               />
               <TouchableOpacity
                 onPress={() => setShowPassword(!showPassword)}
@@ -417,8 +487,8 @@ const styles = StyleSheet.create({
     width: 102,
     height: 102,
     borderRadius: 28,
-    backgroundColor: '#FFFBEB',
-    padding: 4,
+    backgroundColor: '#FFFFFF',
+    padding: 5,
     borderWidth: 3,
     borderColor: '#F59E0B',
     ...SHADOWS.medium,
@@ -444,6 +514,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
     ...SHADOWS.medium,
+  },
+  lockNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    gap: 8,
+  },
+  lockNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#92400E',
+    lineHeight: 16,
   },
   inputLabel: {
     fontSize: 12.5,
@@ -515,5 +604,94 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '800',
     color: COLORS.primary,
+  },
+  iosInstallBannerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.primarySoft,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 14,
+    gap: 8,
+  },
+  iosInstallBannerText: {
+    flex: 1,
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  iosModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  iosModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 18,
+    ...SHADOWS.large,
+  },
+  iosModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  iosModalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  iosModalTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: COLORS.primaryDark,
+  },
+  iosStepBox: {
+    backgroundColor: '#F7FAF7',
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+  },
+  iosStepBadge: {
+    fontSize: 10.5,
+    fontWeight: '900',
+    color: COLORS.primary,
+    marginBottom: 5,
+  },
+  iosStepDesc: {
+    fontSize: 12.5,
+    color: COLORS.textPrimary,
+    lineHeight: 19,
+  },
+  iosCodeText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  iosModalFooter: {
+    marginTop: 8,
+  },
+  iosShareGuideBtn: {
+    backgroundColor: COLORS.primary,
+    height: 46,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  iosShareGuideBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,13 @@ export default function ProfileScreen({ navigation }) {
   const [adresse, setAdresse] = useState(() => initU?.adresse || '');
   const [password, setPassword] = useState(() => initU?.password || '');
   const [showPassword, setShowPassword] = useState(false);
+  const scrollRef = useRef(null);
+
+  const scrollToOffset = (yOffset) => {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: yOffset, animated: true });
+    }, 120);
+  };
 
   const loadData = async () => {
     const u = await getCurrentUser();
@@ -82,7 +89,13 @@ export default function ProfileScreen({ navigation }) {
       title="Mon Profil"
       navigation={navigation}
     >
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.profileBanner}>
           <Image source={require('../../assets/logo.png')} style={styles.avatarLogo} />
           <Text style={styles.profileName}>{user?.nom}</Text>
@@ -93,30 +106,51 @@ export default function ProfileScreen({ navigation }) {
         </View>
 
         <View style={styles.formCard}>
-          <Text style={styles.label}>Nom *</Text>
-          <TextInput style={styles.input} value={nom} onChangeText={setNom} />
+          <Text style={styles.label}>Nom complet * (max 25 caractères)</Text>
+          <TextInput
+            style={styles.input}
+            maxLength={25}
+            value={nom}
+            onChangeText={(txt) => setNom(txt.slice(0, 25))}
+            onFocus={() => scrollToOffset(60)}
+          />
 
-          <Text style={styles.label}>Téléphone *</Text>
+          <Text style={styles.label}>Téléphone * (9 chiffres)</Text>
           <TextInput
             style={styles.input}
             keyboardType="phone-pad"
+            maxLength={9}
             value={telephone}
-            onChangeText={setTelephone}
+            onChangeText={(txt) => setTelephone(txt.replace(/[^0-9]/g, '').slice(0, 9))}
+            onFocus={() => scrollToOffset(130)}
           />
 
           <Text style={styles.label}>Poste</Text>
-          <TextInput style={styles.input} value={poste} onChangeText={setPoste} />
+          <TextInput
+            style={styles.input}
+            value={poste}
+            onChangeText={setPoste}
+            onFocus={() => scrollToOffset(200)}
+          />
 
-          <Text style={styles.label}>Adresse</Text>
-          <TextInput style={styles.input} value={adresse} onChangeText={setAdresse} />
+          <Text style={styles.label}>Adresse (max 25 caractères)</Text>
+          <TextInput
+            style={styles.input}
+            maxLength={25}
+            value={adresse}
+            onChangeText={(txt) => setAdresse(txt.slice(0, 25))}
+            onFocus={() => scrollToOffset(270)}
+          />
 
-          <Text style={styles.label}>Mot de passe *</Text>
+          <Text style={styles.label}>Mot de passe * (6 à 15 caractères)</Text>
           <View style={styles.pwdWrap}>
             <TextInput
               style={[styles.input, { flex: 1, borderWidth: 0 }]}
               secureTextEntry={!showPassword}
+              maxLength={15}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(txt) => setPassword(txt.slice(0, 15))}
+              onFocus={() => scrollToOffset(330)}
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}

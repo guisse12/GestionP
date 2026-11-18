@@ -7,6 +7,9 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import NavigationLayout from '../components/NavigationLayout';
@@ -19,6 +22,9 @@ import {
   computeFarmSummary,
   addStockageAlimentMovement,
   addStockageOeufsMovement,
+  updateStockageMovement,
+  deleteStockageMovement,
+  getNextSuggestedFactureNumber,
 } from '../services/farmDataService';
 
 export default function StockageScreen({ navigation }) {
@@ -36,12 +42,21 @@ export default function StockageScreen({ navigation }) {
   const [quantite, setQuantite] = useState('');
   const [note, setNote] = useState('');
 
-  // Pour une sortie de tablettes d'œufs : prise en compte du prix unitaire évolutif
+  // Pour une sortie de tablettes d'œufs : prise en compte du prix unitaire et du numéro de facture
   const [isSaleFacture, setIsSaleFacture] = useState(true);
+  const [numeroFactureOeuf, setNumeroFactureOeuf] = useState('');
   const [prixUnitaireOeuf, setPrixUnitaireOeuf] = useState(() =>
     String(initS?.prixTabletteDefaut || 2200)
   );
   const [statutPaiement, setStatutPaiement] = useState('Payé');
+
+  // Modale de modification d'un mouvement en cas d'erreur de saisie
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [editDate, setEditDate] = useState('');
+  const [editMode, setEditMode] = useState('sortie');
+  const [editQuantite, setEditQuantite] = useState('');
+  const [editNote, setEditNote] = useState('');
 
   const loadData = async () => {
     const u = await getCurrentUser();
@@ -59,10 +74,9 @@ export default function StockageScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
-  // Seuls l'employé et le gérant ont accès au formulaire.
-  // L'administrateur voit immédiatement la supervision dès la milliseconde 0.
   const isAdmin = user?.role === 'admin';
   const canEdit = user?.role === 'employe' || user?.role === 'gerant';
+  const canModifyHistory = user?.role === 'admin' || user?.role === 'gerant' || user?.role === 'employe';
 
   const s = summary || {};
   const qteNum = Number(quantite) || 0;
@@ -117,9 +131,18 @@ export default function StockageScreen({ navigation }) {
         note: note.trim() || (isSaleFacture ? 'Client Comptoir' : 'Sortie stock'),
         auteur: user?.nom || user?.role || '',
         createFacture: isSaleFacture,
+        numeroFacture: numeroFactureOeuf.trim(),
         prixUnitaire: puNum,
         statutFacture: statutPaiement,
       });
+    }
+
+    if (updated?.duplicateInvoiceNumberForDate) {
+      Alert.alert(
+        'Numéro de facture déjà utilisé à cette date',
+        `La facture N° ${numeroFactureOeuf.trim()} existe déjà pour le ${cleanDate} (${updated.existingInvoice?.client}).\n\nDeux factures peuvent avoir le même numéro uniquement si leurs dates sont différentes.`
+      );
+      return;
     }
 
     if (updated?.insufficientStock) {
@@ -133,7 +156,7 @@ export default function StockageScreen({ navigation }) {
     if (updated?.alreadyExists) {
       Alert.alert(
         'Détail déjà ajouté',
-        `Ce mouvement a déjà été enregistré pour le ${cleanDate}.`
+        `Ce mouvement a déjà été enregistré pour le ${cleanDate}. Vous pouvez le modifier en cas d’erreur.`
       );
       return;
     }
@@ -143,6 +166,7 @@ export default function StockageScreen({ navigation }) {
     setSummary(nextSummary);
     setQuantite('');
     setNote('');
+    setNumeroFactureOeuf('');
 
     Alert.alert(
       'Enregistré',
@@ -150,6 +174,69 @@ export default function StockageScreen({ navigation }) {
         ? `Sortie de ${sortNum} tablettes enregistrée (${formatFCFA(liveMontantVente)}). Nouveau stock : ${projectedStock} tab.`
         : `Mouvement enregistré. Nouveau stock : ${projectedStock}`
     );
+  };
+
+  const openEditMovementModal = (item) => {
+    setEditingItem(item);
+    setEditDate(item.date || new Date().toISOString().split('T')[0]);
+    const isEnt = Number(item.entrees) > 0;
+    setEditMode(isEnt ? 'entree' : 'sortie');
+    setEditQuantite(String(isEnt ? item.entrees : item.sorties));
+    setEditNote(item.note || '');
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEditedMovement = async () => {
+    if (!editingItem) return;
+    const qte = Number(editQuantite) || 0;
+    if (qte <= 0) {
+      Alert.alert('Quantité requise', 'Veuillez saisir une quantité supérieure à 0.');
+      return;
+    }
+
+    const updated = await updateStockageMovement({
+      type: activeType,
+      id: editingItem.id,
+      date: editDate.trim(),
+      entrees: editMode === 'entree' ? qte : 0,
+      sorties: editMode === 'sortie' ? qte : 0,
+      note: editNote.trim(),
+      auteur: user?.nom || user?.role || '',
+    });
+
+    if (updated?.insufficientStock) {
+      Alert.alert(
+        'Stock insuffisant',
+        `Impossible d’appliquer cette modification : le stock disponible maximal est de ${updated.availableStock}.`
+      );
+      return;
+    }
+
+    setWorkbook(updated);
+    setSummary(computeFarmSummary(updated));
+    setEditModalVisible(false);
+    setEditingItem(null);
+    Alert.alert('Modifié ✅', 'Le mouvement de stock a été corrigé avec succès.');
+  };
+
+  const handleDeleteMovement = (item) => {
+    const label = `${item.date} • ${Number(item.entrees) > 0 ? `+${item.entrees}` : `-${item.sorties}`} (${item.note || ''})`;
+    Alert.alert('Supprimer ce mouvement ?', label, [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: async () => {
+          const updated = await deleteStockageMovement(activeType, item.id);
+          setWorkbook(updated);
+          setSummary(computeFarmSummary(updated));
+          if (editingItem?.id === item.id) {
+            setEditModalVisible(false);
+            setEditingItem(null);
+          }
+        },
+      },
+    ]);
   };
 
   const listData = fullList.slice(0, 35);
@@ -162,7 +249,11 @@ export default function StockageScreen({ navigation }) {
       navigation={navigation}
       pendingOrdersCount={s.commandesEnAttente || 0}
     >
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.switchBar}>
           <TouchableOpacity
             style={[styles.switchBtn, activeType === 'aliment' && styles.switchBtnActive]}
@@ -278,7 +369,13 @@ export default function StockageScreen({ navigation }) {
             </View>
 
             <Text style={styles.inputLabel}>Date</Text>
-            <TextInput style={styles.input} value={date} onChangeText={setDate} />
+            <TextInput
+              style={styles.input}
+              value={date}
+              onChangeText={setDate}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={COLORS.textMuted}
+            />
 
             {detailsOfDate.length > 0 && (
               <View style={styles.alreadyAddedBox}>
@@ -287,12 +384,19 @@ export default function StockageScreen({ navigation }) {
                 </Text>
                 {detailsOfDate.map((d) => (
                   <View key={d.id} style={styles.alreadyAddedRow}>
-                    <Ionicons name="lock-closed" size={13} color="#15803D" />
-                    <Text style={styles.alreadyAddedText}>
+                    <Ionicons name="checkmark-circle" size={14} color="#15803D" />
+                    <Text style={[styles.alreadyAddedText, { flex: 1 }]}>
                       {d.entrees > 0 ? `+${d.entrees} entrés ` : ''}
                       {d.sorties > 0 ? `-${d.sorties} sortis ` : ''}
                       {d.note ? `(${d.note})` : ''}
                     </Text>
+                    <TouchableOpacity
+                      style={styles.inlineEditBtn}
+                      onPress={() => openEditMovementModal(d)}
+                    >
+                      <Ionicons name="create-outline" size={14} color="#78350F" />
+                      <Text style={styles.inlineEditBtnText}>Modifier</Text>
+                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -364,6 +468,7 @@ export default function StockageScreen({ navigation }) {
                   ]}
                   keyboardType="numeric"
                   placeholder="0"
+                  placeholderTextColor={COLORS.textMuted}
                   value={quantite}
                   onChangeText={setQuantite}
                 />
@@ -380,6 +485,7 @@ export default function StockageScreen({ navigation }) {
                       style={[styles.numInput, { borderColor: '#FCA5A5' }]}
                       keyboardType="numeric"
                       placeholder="0"
+                      placeholderTextColor={COLORS.textMuted}
                       value={quantite}
                       onChangeText={setQuantite}
                     />
@@ -393,6 +499,7 @@ export default function StockageScreen({ navigation }) {
                       style={[styles.numInput, { borderColor: '#FCD34D' }]}
                       keyboardType="numeric"
                       placeholder="2200"
+                      placeholderTextColor={COLORS.textMuted}
                       value={prixUnitaireOeuf}
                       onChangeText={setPrixUnitaireOeuf}
                     />
@@ -415,30 +522,43 @@ export default function StockageScreen({ navigation }) {
                 </TouchableOpacity>
 
                 {isSaleFacture && (
-                  <View style={styles.payStatusRow}>
-                    {['Payé', 'Non Payé'].map((st) => (
-                      <TouchableOpacity
-                        key={st}
-                        style={[
-                          styles.payStatusChip,
-                          statutPaiement === st && {
-                            backgroundColor: st === 'Payé' ? COLORS.secondary : COLORS.danger,
-                            borderColor: st === 'Payé' ? COLORS.secondary : COLORS.danger,
-                          },
-                        ]}
-                        onPress={() => setStatutPaiement(st)}
-                      >
-                        <Text
+                  <>
+                    <View style={styles.payStatusRow}>
+                      {['Payé', 'Non Payé'].map((st) => (
+                        <TouchableOpacity
+                          key={st}
                           style={[
-                            styles.payStatusChipText,
-                            statutPaiement === st && { color: '#FFFFFF' },
+                            styles.payStatusChip,
+                            statutPaiement === st && {
+                              backgroundColor: st === 'Payé' ? COLORS.secondary : COLORS.danger,
+                              borderColor: st === 'Payé' ? COLORS.secondary : COLORS.danger,
+                            },
                           ]}
+                          onPress={() => setStatutPaiement(st)}
                         >
-                          {st}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+                          <Text
+                            style={[
+                              styles.payStatusChipText,
+                              statutPaiement === st && { color: '#FFFFFF' },
+                            ]}
+                          >
+                            {st}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    <Text style={styles.inputLabel}>
+                      N° de Facture (personnalisable)
+                    </Text>
+                    <TextInput
+                      style={[styles.input, { borderColor: '#F59E0B', borderWidth: 1.4 }]}
+                      placeholder={`Auto : N° ${getNextSuggestedFactureNumber(workbook)} (ou saisir votre N°)`}
+                      placeholderTextColor={COLORS.textMuted}
+                      value={numeroFactureOeuf}
+                      onChangeText={setNumeroFactureOeuf}
+                    />
+                  </>
                 )}
               </>
             )}
@@ -450,8 +570,8 @@ export default function StockageScreen({ navigation }) {
               style={styles.input}
               placeholder={
                 activeType === 'aliment'
-                  ? 'Ex: Consommation Boxe 1 & 2, Livraison Sedima...'
-                  : 'Ex: Client Diop, Livraison Dakar...'
+                  ? 'Consommation Boxe 1 & 2, Livraison...'
+                  : 'Nom du client ou détail...'
               }
               placeholderTextColor={COLORS.textMuted}
               value={note}
@@ -478,16 +598,16 @@ export default function StockageScreen({ navigation }) {
         <Text style={styles.sectionTitle}>Historique ({fullList.length})</Text>
 
         {listData.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={styles.rowCard}
-            activeOpacity={0.85}
-            onPress={() => navigation.navigate('RapportJournalier', { date: item.date })}
-          >
-            <View style={{ flex: 1 }}>
+          <View key={item.id} style={styles.rowCard}>
+            <TouchableOpacity
+              style={{ flex: 1 }}
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate('RapportJournalier', { date: item.date })}
+            >
               <Text style={styles.rowDate}>{item.date}</Text>
               {item.note ? <Text style={styles.rowNote}>{item.note}</Text> : null}
-            </View>
+            </TouchableOpacity>
+
             <View style={styles.rowMetrics}>
               {Number(item.entrees) > 0 && (
                 <View style={styles.badgeEntree}>
@@ -502,10 +622,128 @@ export default function StockageScreen({ navigation }) {
               <View style={styles.badgeStock}>
                 <Text style={styles.badgeStockText}>Stock: {item.stockRestant}</Text>
               </View>
+
+              {canModifyHistory && (
+                <TouchableOpacity
+                  style={styles.rowEditBtn}
+                  onPress={() => openEditMovementModal(item)}
+                >
+                  <Ionicons name="create-outline" size={16} color="#78350F" />
+                </TouchableOpacity>
+              )}
             </View>
-          </TouchableOpacity>
+          </View>
         ))}
       </ScrollView>
+
+      {/* Modale de modification / suppression d'un mouvement de stock en cas d'erreur */}
+      <Modal visible={editModalVisible} transparent animationType="slide">
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView
+            contentContainerStyle={styles.modalScrollInner}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeaderRow}>
+                <Text style={styles.modalTitle}>Modifier le mouvement</Text>
+                <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                  <Ionicons name="close-circle" size={24} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.inputLabel}>Date</Text>
+              <TextInput
+                style={styles.input}
+                value={editDate}
+                onChangeText={setEditDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={COLORS.textMuted}
+              />
+
+              <Text style={styles.inputLabel}>Type de mouvement</Text>
+              <View style={styles.modeSelectorRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.modeChip,
+                    editMode === 'sortie' && styles.modeChipSortieActive,
+                  ]}
+                  onPress={() => setEditMode('sortie')}
+                >
+                  <Text
+                    style={[
+                      styles.modeChipText,
+                      editMode === 'sortie' && { color: '#FFFFFF' },
+                    ]}
+                  >
+                    Sortie (-)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modeChip,
+                    editMode === 'entree' && styles.modeChipEntreeActive,
+                  ]}
+                  onPress={() => setEditMode('entree')}
+                >
+                  <Text
+                    style={[
+                      styles.modeChipText,
+                      editMode === 'entree' && { color: '#FFFFFF' },
+                    ]}
+                  >
+                    Entrée (+)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.inputLabel}>Quantité *</Text>
+              <TextInput
+                style={styles.numInput}
+                keyboardType="numeric"
+                value={editQuantite}
+                onChangeText={setEditQuantite}
+              />
+
+              <Text style={styles.inputLabel}>Nom du Client / Détail</Text>
+              <TextInput
+                style={styles.input}
+                value={editNote}
+                onChangeText={setEditNote}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
+                {editingItem && (
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, { backgroundColor: '#FEE2E2', flex: 0.8 }]}
+                    onPress={() => handleDeleteMovement(editingItem)}
+                  >
+                    <Ionicons name="trash-outline" size={17} color={COLORS.danger} />
+                    <Text style={[styles.modalActionBtnText, { color: COLORS.danger }]}>
+                      Supprimer
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.modalActionBtn, { backgroundColor: '#78716C', flex: 0.8 }]}
+                  onPress={() => setEditModalVisible(false)}
+                >
+                  <Text style={styles.modalActionBtnText}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalActionBtn, { backgroundColor: COLORS.primary, flex: 1.2 }]}
+                  onPress={handleSaveEditedMovement}
+                >
+                  <Text style={styles.modalActionBtnText}>Enregistrer</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
     </NavigationLayout>
   );
 }
@@ -683,12 +921,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    marginTop: 2,
+    marginTop: 4,
   },
   alreadyAddedText: {
     fontSize: 12,
     fontWeight: '700',
     color: '#15803D',
+  },
+  inlineEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  inlineEditBtnText: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#78350F',
   },
   modeSelectorRow: {
     flexDirection: 'row',
@@ -728,6 +982,7 @@ const styles = StyleSheet.create({
   numInput: {
     backgroundColor: '#FAF7F2',
     borderWidth: 1.4,
+    borderColor: '#D6CFC2',
     borderRadius: 12,
     height: 46,
     paddingHorizontal: 12,
@@ -858,5 +1113,52 @@ const styles = StyleSheet.create({
     color: '#92400E',
     fontWeight: '800',
     fontSize: 12,
+  },
+  rowEditBtn: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 8,
+    padding: 5,
+    marginLeft: 2,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  modalScrollInner: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 18,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: COLORS.textPrimary,
+  },
+  modalActionBtn: {
+    height: 44,
+    borderRadius: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+  modalActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "GestionP",
+    "name": "TERA AGRO - SUARL",
     "slug": "gestion-p",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FFFDF7"
+      "backgroundColor": "#FFFFFF"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -20,9 +20,10 @@
     },
     "android": {
       "package": "sn.gestionp.app",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#B45309"
+        "backgroundColor": "#FFFFFF"
       },
       "permissions": [
         "INTERNET"

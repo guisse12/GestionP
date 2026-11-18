@@ -56,11 +56,14 @@ export default function BilanScreen({ navigation }) {
   const livePrixPoussin = Number(prixPoussinInput) || 0;
   const livePrixTablette = Number(prixTabletteInput) || 2200;
   const liveDepenseAliment = (s.totalSacsAlimentEntres || 3041) * livePrixSac;
+  const liveVersementsAliment = s.totalVersementsAliment || 0;
   const liveDepensePoussins = (s.totalPouletsInitial || 8020) * livePrixPoussin;
   const liveTotalDepenses =
     liveDepenseAliment +
+    liveVersementsAliment +
     liveDepensePoussins +
     (s.depenseSalaires || 0) +
+    (s.depenseEntretiens || 0) +
     (s.depenseConstructions || 0) +
     (s.depenseAutres || 0);
   const liveReste = (s.totalVentesPayees || 0) - liveTotalDepenses;
@@ -84,7 +87,12 @@ export default function BilanScreen({ navigation }) {
       navigation={navigation}
       pendingOrdersCount={s.commandesEnAttente || 0}
     >
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 60 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.heroBilanCard}>
           <Text style={styles.heroTopTag}>RESTE APRÈS DÉPENSES</Text>
           <Text
@@ -195,6 +203,14 @@ export default function BilanScreen({ navigation }) {
             <Text style={styles.bilanRowAmount}>{formatFCFA(liveDepenseAliment)}</Text>
           </View>
 
+          <TouchableOpacity
+            style={styles.bilanRow}
+            onPress={() => navigation.navigate('Depenses', { tab: 'aliment' })}
+          >
+            <Text style={styles.bilanRowTitle}>Dépenses Aliment</Text>
+            <Text style={styles.bilanRowAmount}>{formatFCFA(liveVersementsAliment)}</Text>
+          </TouchableOpacity>
+
           <View style={styles.bilanRow}>
             <Text style={styles.bilanRowTitle}>
               Poussins ({formatNumber(s.totalPouletsInitial)})
@@ -217,7 +233,15 @@ export default function BilanScreen({ navigation }) {
 
           <TouchableOpacity
             style={styles.bilanRow}
-            onPress={() => navigation.navigate('Depenses')}
+            onPress={() => navigation.navigate('Depenses', { tab: 'entretien' })}
+          >
+            <Text style={styles.bilanRowTitle}>Entretien</Text>
+            <Text style={styles.bilanRowAmount}>{formatFCFA(s.depenseEntretiens || 0)}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.bilanRow}
+            onPress={() => navigation.navigate('Depenses', { tab: 'constructions' })}
           >
             <Text style={styles.bilanRowTitle}>Constructions</Text>
             <Text style={styles.bilanRowAmount}>{formatFCFA(s.depenseConstructions)}</Text>
@@ -225,7 +249,7 @@ export default function BilanScreen({ navigation }) {
 
           <TouchableOpacity
             style={styles.bilanRow}
-            onPress={() => navigation.navigate('Depenses')}
+            onPress={() => navigation.navigate('Depenses', { tab: 'autres' })}
           >
             <Text style={styles.bilanRowTitle}>Autres dépenses</Text>
             <Text style={styles.bilanRowAmount}>{formatFCFA(s.depenseAutres)}</Text>

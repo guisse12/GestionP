@@ -6965,41 +6965,15 @@ export const INITIAL_EMPLOYES = [
   {
     "id": "emp_1",
     "nom": "COLY",
-    "poste": "Aviculteur - Boxe 1",
+    "categorie": "gerant",
+    "poste": "Gérant du poulailler",
+    "telephone": "777527561",
+    "adresse": "Thiès",
     "salaireMensuel": 0,
     "dateDebut": "2026-03-24",
     "dateFin": "",
     "nbMoisManuel": null,
-    "actif": true
-  },
-  {
-    "id": "emp_2",
-    "nom": "Omar GUISSE",
-    "poste": "Chef d'équipe / Gérant",
-    "salaireMensuel": 0,
-    "dateDebut": "2026-03-24",
-    "dateFin": "",
-    "nbMoisManuel": null,
-    "actif": true
-  },
-  {
-    "id": "emp_3",
-    "nom": "Siradio CISSE",
-    "poste": "Aviculteur - Boxe 2",
-    "salaireMensuel": 0,
-    "dateDebut": "2026-03-24",
-    "dateFin": "",
-    "nbMoisManuel": null,
-    "actif": true
-  },
-  {
-    "id": "emp_4",
-    "nom": "BALDE",
-    "poste": "Gardien & Suivi Stock",
-    "salaireMensuel": 0,
-    "dateDebut": "2026-03-24",
-    "dateFin": "",
-    "nbMoisManuel": null,
+    "paiements": [],
     "actif": true
   }
 ];

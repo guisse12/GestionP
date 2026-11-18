@@ -62,7 +62,7 @@ export default function DashboardScreen({ navigation }) {
     <NavigationLayout
       user={user}
       activeTab="Dashboard"
-      title="GestionP"
+      title="TERA AGRO - SUARL"
       navigation={navigation}
       pendingUsersCount={pendingUsersCount}
       pendingOrdersCount={s.commandesEnAttente || 0}
@@ -231,17 +231,66 @@ export default function DashboardScreen({ navigation }) {
           <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.moduleRowCard}
-          onPress={() => navigation.navigate('Depenses')}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.moduleIconBox, { backgroundColor: '#E0F2FE' }]}>
-            <Ionicons name="wallet" size={24} color="#0284C7" />
+        <View style={styles.depensesModuleCard}>
+          <TouchableOpacity
+            style={styles.depensesModuleHeader}
+            onPress={() => navigation.navigate('Depenses')}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.moduleIconBox, { backgroundColor: '#E0F2FE' }]}>
+              <Ionicons name="wallet" size={24} color="#0284C7" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.moduleTitle}>Dépenses & Charges</Text>
+              <Text style={styles.moduleSubTitle}>
+                Dépenses Aliment • Entretien • Achats • Constructions
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
+
+          <View style={styles.depensesQuickChipsRow}>
+            <TouchableOpacity
+              style={[styles.depenseQuickChip, { backgroundColor: '#DCFCE7', borderColor: '#22C55E' }]}
+              onPress={() => navigation.navigate('Depenses', { tab: 'aliment' })}
+            >
+              <Ionicons name="nutrition" size={14} color="#15803D" />
+              <Text style={[styles.depenseQuickChipText, { color: '#14532D' }]}>
+                Dépenses Aliment
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.depenseQuickChip, { backgroundColor: '#FFEDD5', borderColor: '#F97316' }]}
+              onPress={() => navigation.navigate('Depenses', { tab: 'entretien' })}
+            >
+              <Ionicons name="build" size={14} color="#C2410C" />
+              <Text style={[styles.depenseQuickChipText, { color: '#9A3412' }]}>
+                Entretien
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.depenseQuickChip, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' }]}
+              onPress={() => navigation.navigate('Depenses', { tab: 'autres' })}
+            >
+              <Ionicons name="medkit" size={14} color="#B45309" />
+              <Text style={[styles.depenseQuickChipText, { color: '#78350F' }]}>
+                Autres Achats
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.depenseQuickChip, { backgroundColor: '#E0F2FE', borderColor: '#0284C7' }]}
+              onPress={() => navigation.navigate('Depenses', { tab: 'constructions' })}
+            >
+              <Ionicons name="construct" size={14} color="#0369A1" />
+              <Text style={[styles.depenseQuickChipText, { color: '#075985' }]}>
+                Constructions
+              </Text>
+            </TouchableOpacity>
           </View>
-          <Text style={styles.moduleTitle}>Dépenses & Constructions</Text>
-          <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-        </TouchableOpacity>
+        </View>
 
         {(isAdmin || isGerant) && (
           <TouchableOpacity
@@ -471,6 +520,48 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: COLORS.textPrimary,
+  },
+  moduleSubTitle: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  depensesModuleCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 13,
+    marginBottom: 9,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    ...SHADOWS.small,
+  },
+  depensesModuleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  depensesQuickChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+    marginTop: 11,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F3E8D2',
+  },
+  depenseQuickChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  depenseQuickChipText: {
+    fontSize: 11.5,
+    fontWeight: '800',
   },
   adminTag: {
     flexDirection: 'row',

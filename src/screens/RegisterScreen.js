@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Image,
   SafeAreaView,
   StatusBar,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../theme/colors';
@@ -26,6 +27,27 @@ export default function RegisterScreen({ navigation }) {
   const [role, setRole] = useState('client');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const scrollRef = useRef(null);
+
+  const scrollToOffset = (yOffset) => {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: yOffset, animated: true });
+    }, 120);
+  };
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e?.endCoordinates?.height || 260);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const handleRegister = async () => {
     setLoading(true);
@@ -43,15 +65,11 @@ export default function RegisterScreen({ navigation }) {
         return;
       }
 
-      if (res.requiresValidation) {
-        Alert.alert(
-          'Demande envoyée',
-          "Votre compte sera activé après validation par l'Administrateur.",
-          [{ text: 'OK', onPress: () => navigation.replace('Login') }]
-        );
-      } else {
-        navigation.replace('ClientHome');
-      }
+      Alert.alert(
+        'Inscription enregistrée ⏳',
+        "Votre compte a été créé et est en attente de validation par l'Administrateur. Une fois validé, vous pourrez vous connecter et naviguer dans l'application.",
+        [{ text: 'OK', onPress: () => navigation.replace('Login') }]
+      );
     } catch (e) {
       Alert.alert('Erreur', "Une erreur s'est produite.");
     } finally {
@@ -66,7 +84,15 @@ export default function RegisterScreen({ navigation }) {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: keyboardHeight > 0 ? 100 : 36 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.header}>
             <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
               <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
@@ -121,44 +147,50 @@ export default function RegisterScreen({ navigation }) {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.inputLabel}>Nom complet *</Text>
+            <Text style={styles.inputLabel}>Nom complet * (max 25 caractères)</Text>
             <View style={styles.inputWrap}>
               <Ionicons name="person-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="Votre nom"
                 placeholderTextColor={COLORS.textMuted}
+                maxLength={25}
                 value={nom}
-                onChangeText={setNom}
+                onChangeText={(txt) => setNom(txt.slice(0, 25))}
+                onFocus={() => scrollToOffset(80)}
               />
             </View>
 
-            <Text style={styles.inputLabel}>Téléphone *</Text>
+            <Text style={styles.inputLabel}>Téléphone * (9 chiffres)</Text>
             <View style={styles.inputWrap}>
               <Ionicons name="call-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="77 123 45 67"
+                placeholder="771234567"
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="phone-pad"
+                maxLength={9}
                 value={telephone}
-                onChangeText={setTelephone}
+                onChangeText={(txt) => setTelephone(txt.replace(/[^0-9]/g, '').slice(0, 9))}
+                onFocus={() => scrollToOffset(150)}
               />
             </View>
 
-            <Text style={styles.inputLabel}>Adresse</Text>
+            <Text style={styles.inputLabel}>Adresse (max 25 caractères)</Text>
             <View style={styles.inputWrap}>
               <Ionicons name="location-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="Ville / Quartier"
                 placeholderTextColor={COLORS.textMuted}
+                maxLength={25}
                 value={adresse}
-                onChangeText={setAdresse}
+                onChangeText={(txt) => setAdresse(txt.slice(0, 25))}
+                onFocus={() => scrollToOffset(220)}
               />
             </View>
 
-            <Text style={styles.inputLabel}>Mot de passe *</Text>
+            <Text style={styles.inputLabel}>Mot de passe * (6 à 15 caractères)</Text>
             <View style={styles.inputWrap}>
               <Ionicons name="lock-closed-outline" size={20} color={COLORS.primary} style={styles.inputIcon} />
               <TextInput
@@ -166,8 +198,10 @@ export default function RegisterScreen({ navigation }) {
                 placeholder="••••••••"
                 placeholderTextColor={COLORS.textMuted}
                 secureTextEntry={!showPassword}
+                maxLength={15}
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(txt) => setPassword(txt.slice(0, 15))}
+                onFocus={() => scrollToOffset(290)}
               />
               <TouchableOpacity
                 onPress={() => setShowPassword(!showPassword)}

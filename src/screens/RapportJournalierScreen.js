@@ -10,6 +10,7 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,7 +24,9 @@ import {
   computeFarmSummary,
   computePeriodReport,
   getAvailableReportDates,
+  getAvailableReportMonths,
   getAvailableReportYears,
+  formatMonthLabelFr,
 } from '../services/farmDataService';
 import {
   savePdfToDevice,
@@ -36,24 +39,29 @@ import {
 const PERIOD_MODES = [
   { key: 'day', label: 'Journalier', icon: 'today-outline' },
   { key: 'week', label: 'Semaine', icon: 'calendar-outline' },
+  { key: 'month', label: 'Mensuel', icon: 'calendar-number-outline' },
   { key: 'year', label: 'Annuel', icon: 'stats-chart-outline' },
 ];
 
 export default function RapportJournalierScreen({ navigation, route }) {
   const initialWb = getCachedWorkbook();
   const initialDates = getAvailableReportDates(initialWb);
+  const initialMonths = getAvailableReportMonths(initialWb);
   const initialYears = getAvailableReportYears(initialWb);
   const defaultDate =
     route?.params?.date ||
     (initialDates.length > 0 ? initialDates[0] : new Date().toISOString().split('T')[0]);
+  const defaultMonth =
+    initialMonths.length > 0 ? initialMonths[0] : defaultDate.slice(0, 7);
   const defaultYear =
     initialYears.length > 0 ? initialYears[0] : String(new Date().getFullYear());
 
   const [user, setUser] = useState(() => getCachedUser());
   const [workbook, setWorkbook] = useState(() => initialWb);
   const [summary, setSummary] = useState(() => getCachedSummary());
-  const [periodType, setPeriodType] = useState('day'); // 'day' | 'week' | 'year'
+  const [periodType, setPeriodType] = useState('day'); // 'day' | 'week' | 'month' | 'year'
   const [selectedDate, setSelectedDate] = useState(defaultDate);
+  const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
   const [selectedYear, setSelectedYear] = useState(defaultYear);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [printingPdf, setPrintingPdf] = useState(false);
@@ -74,10 +82,12 @@ export default function RapportJournalierScreen({ navigation, route }) {
   }, [navigation]);
 
   const availableDates = getAvailableReportDates(workbook);
+  const availableMonths = getAvailableReportMonths(workbook);
   const availableYears = getAvailableReportYears(workbook);
   const report = computePeriodReport(workbook, {
     periodType,
     date: selectedDate,
+    month: selectedMonth,
     year: selectedYear,
   });
   const s = summary || {};
@@ -86,6 +96,23 @@ export default function RapportJournalierScreen({ navigation, route }) {
     if (periodType === 'year') {
       const nextYr = String((Number(selectedYear) || 2026) + direction);
       setSelectedYear(nextYr);
+      return;
+    }
+
+    if (periodType === 'month') {
+      const idx = availableMonths.indexOf(selectedMonth.trim());
+      if (idx >= 0) {
+        const nextIdx = idx - direction;
+        if (nextIdx >= 0 && nextIdx < availableMonths.length) {
+          setSelectedMonth(availableMonths[nextIdx]);
+          return;
+        }
+      }
+      const parts = String(selectedMonth || '').split('-').map(Number);
+      if (parts.length >= 2 && !parts.some(isNaN)) {
+        const dt = new Date(Date.UTC(parts[0], parts[1] - 1 + direction, 1));
+        setSelectedMonth(dt.toISOString().slice(0, 7));
+      }
       return;
     }
 
@@ -158,7 +185,7 @@ export default function RapportJournalierScreen({ navigation, route }) {
 
   const handleShareTextReport = async () => {
     const lines = [
-      `📊 ${report.periodTitle.toUpperCase()} - GestionP`,
+      `📊 ${report.periodTitle.toUpperCase()} - TERA AGRO - SUARL`,
       `📅 Période : ${report.periodLabel}`,
       `--------------------------------`,
       `🥚 PRODUCTION (${report.periodBadge}) :`,
@@ -173,12 +200,26 @@ export default function RapportJournalierScreen({ navigation, route }) {
       `• Aliment : +${formatNumber(report.alimEntrees)} entrés / -${formatNumber(report.alimSorties)} sortis (Stock actuel: ${formatNumber(s.stockSacsAlimentRestant)} sacs)`,
       `• Œufs : +${formatNumber(report.oeufsEntrees)} entrés / -${formatNumber(report.oeufsSorties)} sortis (Stock actuel: ${formatNumber(s.stockTablettesDisponibles)} tab.)`,
       `--------------------------------`,
-      `💸 DÉPENSES (${report.autresRows.length + report.constRows.length}) :`,
+      `💸 DÉPENSES (${
+        report.autresRows.length +
+        (report.versementsAlimentRows?.length || 0) +
+        (report.entretiensRows?.length || 0) +
+        report.constRows.length
+      }) :`,
       `• Autres achats : ${formatFCFA(report.totalAutresJour)}`,
+      `• Versements aliment : ${formatFCFA(report.totalVersementsAlimentJour || 0)}`,
+      `• Entretien : ${formatFCFA(report.totalEntretiensJour || 0)}`,
       `• Constructions : ${formatFCFA(report.totalConstJour)}`,
       `• Total Dépenses : ${formatFCFA(report.totalDepensesJour)}`,
       `--------------------------------`,
       `🧾 VENTES & FACTURES (${report.facturesRows.length}) :`,
+      `• Prix unitaire tablette(s) : ${report.prixUnitaireLabel}`,
+      ...(report.prixUnitairesDetails && report.prixUnitairesDetails.length > 1
+        ? report.prixUnitairesDetails.map(
+            (d) =>
+              `   - ${formatNumber(d.quantite)} tab. à ${formatFCFA(d.prixUnitaire)} = ${formatFCFA(d.total)}`
+          )
+        : []),
       `• Tablettes facturées : ${formatNumber(report.tablettesFactureesJour)} tab.`,
       `• Ventes Payées : ${formatFCFA(report.ventesPayeesJour)}`,
       `• Ventes Non Payées : ${formatFCFA(report.ventesNonPayeesJour)}`,
@@ -243,6 +284,13 @@ export default function RapportJournalierScreen({ navigation, route }) {
                   keyboardType="numeric"
                   placeholder="2026"
                 />
+              ) : periodType === 'month' ? (
+                <TextInput
+                  style={styles.dateTextInput}
+                  value={selectedMonth}
+                  onChangeText={setSelectedMonth}
+                  placeholder="YYYY-MM"
+                />
               ) : (
                 <TextInput
                   style={styles.dateTextInput}
@@ -271,6 +319,15 @@ export default function RapportJournalierScreen({ navigation, route }) {
             </View>
           )}
 
+          {periodType === 'month' && (
+            <View style={styles.periodRangePill}>
+              <Ionicons name="calendar-outline" size={15} color={COLORS.primaryDark} />
+              <Text style={styles.periodRangeText}>
+                Mois de {formatMonthLabelFr(selectedMonth)} ({selectedMonth})
+              </Text>
+            </View>
+          )}
+
           {periodType === 'year' ? (
             <ScrollView
               horizontal
@@ -287,6 +344,27 @@ export default function RapportJournalierScreen({ navigation, route }) {
                   >
                     <Text style={[styles.dateChipText, active && { color: '#FFFFFF' }]}>
                       Année {yr}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : periodType === 'month' ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.recentDatesScroll}
+            >
+              {availableMonths.map((ym) => {
+                const active = ym === selectedMonth.trim();
+                return (
+                  <TouchableOpacity
+                    key={ym}
+                    style={[styles.dateChip, active && styles.dateChipActive]}
+                    onPress={() => setSelectedMonth(ym)}
+                  >
+                    <Text style={[styles.dateChipText, active && { color: '#FFFFFF' }]}>
+                      {formatMonthLabelFr(ym)}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -448,6 +526,8 @@ export default function RapportJournalierScreen({ navigation, route }) {
               <Text style={styles.sectionTitle}>
                 {periodType === 'week'
                   ? 'Récapitulatif des 7 Jours de la Semaine'
+                  : periodType === 'month'
+                  ? `Récapitulatif Journalier du Mois (${report.periodLabel})`
                   : `Récapitulatif Mensuel (${report.year})`}
               </Text>
             </View>
@@ -459,6 +539,9 @@ export default function RapportJournalierScreen({ navigation, route }) {
                   <Text style={styles.detailLineSub}>
                     🥚 {formatNumber(row.totalProduits)} tab. • 💀 {row.totalMortalite} morts • 🌾{' '}
                     {formatNumber(row.consoAliment)} sacs
+                    {row.tablettesFacturees > 0
+                      ? ` • 🏷️ PU : ${row.prixUnitaireLabel}`
+                      : ''}
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
@@ -544,17 +627,85 @@ export default function RapportJournalierScreen({ navigation, route }) {
               <Ionicons name="wallet" size={18} color="#0284C7" />
             </View>
             <Text style={styles.sectionTitle}>
-              Dépenses ({report.autresRows.length + report.constRows.length})
+              Dépenses ({
+                report.autresRows.length +
+                (report.versementsAlimentRows?.length || 0) +
+                (report.entretiensRows?.length || 0) +
+                report.constRows.length
+              })
             </Text>
             <Text style={styles.sectionRightTotal}>
               {formatFCFA(report.totalDepensesJour)}
             </Text>
           </View>
 
-          {report.autresRows.length === 0 && report.constRows.length === 0 ? (
+          <View style={styles.stockRowSummary}>
+            <View style={[styles.stockSummaryBox, { backgroundColor: '#DCFCE7', borderWidth: 1, borderColor: '#86EFAC' }]}>
+              <Text style={[styles.stockTypeTitle, { color: '#14532D' }]}>
+                🌾 Dépenses Aliment ({(report.versementsAlimentRows || []).length})
+              </Text>
+              <Text style={[styles.stockFlowText, { color: '#15803D', fontWeight: '900' }]}>
+                {formatFCFA(report.totalVersementsAlimentJour || 0)}
+              </Text>
+            </View>
+            <View style={[styles.stockSummaryBox, { backgroundColor: '#FFEDD5', borderWidth: 1, borderColor: '#FDBA74' }]}>
+              <Text style={[styles.stockTypeTitle, { color: '#9A3412' }]}>
+                🔧 Entretien ({(report.entretiensRows || []).length})
+              </Text>
+              <Text style={[styles.stockFlowText, { color: '#C2410C', fontWeight: '900' }]}>
+                {formatFCFA(report.totalEntretiensJour || 0)}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.stockRowSummary}>
+            <View style={styles.stockSummaryBox}>
+              <Text style={styles.stockTypeTitle}>
+                💊 Autres Achats ({report.autresRows.length})
+              </Text>
+              <Text style={[styles.stockFlowText, { color: COLORS.danger, fontWeight: '800' }]}>
+                {formatFCFA(report.totalAutresJour || 0)}
+              </Text>
+            </View>
+            <View style={styles.stockSummaryBox}>
+              <Text style={styles.stockTypeTitle}>
+                🏗️ Constructions ({report.constRows.length})
+              </Text>
+              <Text style={[styles.stockFlowText, { color: COLORS.danger, fontWeight: '800' }]}>
+                {formatFCFA(report.totalConstJour || 0)}
+              </Text>
+            </View>
+          </View>
+
+          {report.autresRows.length === 0 &&
+          (report.versementsAlimentRows?.length || 0) === 0 &&
+          (report.entretiensRows?.length || 0) === 0 &&
+          report.constRows.length === 0 ? (
             <Text style={styles.emptyText}>Aucune dépense enregistrée sur cette période</Text>
           ) : (
             <>
+              {(report.versementsAlimentRows || []).slice(0, 20).map((v) => (
+                <View key={v.id} style={styles.detailLine}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailLineTitle}>🌾 {v.designation || v.produit}</Text>
+                    <Text style={styles.detailLineSub}>{v.date}</Text>
+                  </View>
+                  <Text style={[styles.detailLineVal, { color: COLORS.danger }]}>
+                    {formatFCFA(v.montant)}
+                  </Text>
+                </View>
+              ))}
+              {(report.entretiensRows || []).slice(0, 20).map((e) => (
+                <View key={e.id} style={styles.detailLine}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailLineTitle}>🔧 {e.designation || e.produit}</Text>
+                    <Text style={styles.detailLineSub}>{e.date}</Text>
+                  </View>
+                  <Text style={[styles.detailLineVal, { color: COLORS.danger }]}>
+                    {formatFCFA(e.montant)}
+                  </Text>
+                </View>
+              ))}
               {report.autresRows.slice(0, 20).map((d) => (
                 <View key={d.id} style={styles.detailLine}>
                   <View style={{ flex: 1 }}>
@@ -595,6 +746,39 @@ export default function RapportJournalierScreen({ navigation, route }) {
             </Text>
           </View>
 
+          {/* Encadré Prix Unitaire des Tablettes sur la période */}
+          <View style={styles.stockRowSummary}>
+            <View style={[styles.stockSummaryBox, { backgroundColor: '#FEF9C3', borderWidth: 1, borderColor: '#FDE047' }]}>
+              <Text style={[styles.stockTypeTitle, { color: '#854D0E' }]}>
+                Prix unitaire tablette(s)
+              </Text>
+              <Text style={[styles.stockFlowText, { color: '#713F12', fontWeight: '900', fontSize: 13 }]}>
+                {report.prixUnitaireLabel}
+              </Text>
+            </View>
+            <View style={styles.stockSummaryBox}>
+              <Text style={styles.stockTypeTitle}>Tablettes facturées</Text>
+              <Text style={[styles.stockFlowText, { fontWeight: '900', color: COLORS.primaryDark }]}>
+                {formatNumber(report.tablettesFactureesJour)} tab.
+              </Text>
+            </View>
+          </View>
+
+          {report.prixUnitairesDetails && report.prixUnitairesDetails.length > 1 && (
+            <View style={{ marginBottom: 8 }}>
+              {report.prixUnitairesDetails.map((d) => (
+                <View key={d.prixUnitaire} style={styles.detailLine}>
+                  <Text style={styles.detailLineTitle}>
+                    🏷️ Tarif {formatFCFA(d.prixUnitaire)} / tab. ({d.count} facture{d.count > 1 ? 's' : ''})
+                  </Text>
+                  <Text style={styles.detailLineVal}>
+                    {formatNumber(d.quantite)} tab. = {formatFCFA(d.total)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
           {report.facturesRows.length === 0 && report.commandesRows.length === 0 ? (
             <Text style={styles.emptyText}>Aucune vente facturée sur cette période</Text>
           ) : (
@@ -606,7 +790,7 @@ export default function RapportJournalierScreen({ navigation, route }) {
                       {f.client} (N° {f.numeroFacture})
                     </Text>
                     <Text style={styles.detailLineSub}>
-                      {f.date} • {f.quantite} tab. × {formatFCFA(f.prixUnitaire)} • {f.statut}
+                      {f.date} • {f.quantite} tab. × PU {formatFCFA(f.prixUnitaire)}/tab. • {f.statut}
                     </Text>
                   </View>
                   <Text
@@ -648,7 +832,7 @@ export default function RapportJournalierScreen({ navigation, route }) {
             <View style={{ flex: 1 }}>
               <Text style={styles.modalTitle}>Document PDF Officiel</Text>
               <Text style={styles.modalSub} numberOfLines={1}>
-                {pdfModalData?.fileName || 'Rapport_GestionP.pdf'}
+                {pdfModalData?.fileName || 'Rapport_TERA_AGRO.pdf'}
               </Text>
             </View>
 
@@ -678,15 +862,21 @@ export default function RapportJournalierScreen({ navigation, route }) {
             </TouchableOpacity>
           </View>
 
-          {pdfModalData?.html && (
-            <WebView
-              originWhitelist={['*']}
-              source={{ html: pdfModalData.html }}
-              onMessage={handleWebViewMessage}
-              javaScriptEnabled={true}
-              style={{ flex: 1, backgroundColor: '#F5EFE6' }}
-            />
-          )}
+          {pdfModalData?.html &&
+            (Platform.OS === 'web' ? (
+              React.createElement('iframe', {
+                srcDoc: pdfModalData.html,
+                style: { flex: 1, width: '100%', height: '100%', border: 'none', backgroundColor: '#F5EFE6' },
+              })
+            ) : (
+              <WebView
+                originWhitelist={['*']}
+                source={{ html: pdfModalData.html }}
+                onMessage={handleWebViewMessage}
+                javaScriptEnabled={true}
+                style={{ flex: 1, backgroundColor: '#F5EFE6' }}
+              />
+            ))}
         </View>
       </Modal>
     </NavigationLayout>
@@ -709,16 +899,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 4,
     borderRadius: 11,
-    gap: 6,
+    gap: 4,
   },
   modeTabBtnActive: {
     backgroundColor: COLORS.primaryDark,
     ...SHADOWS.small,
   },
   modeTabText: {
-    fontSize: 13,
+    fontSize: 11.5,
     fontWeight: '800',
     color: COLORS.primaryDark,
   },
