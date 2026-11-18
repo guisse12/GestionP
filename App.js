@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { AppState, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
@@ -81,23 +82,21 @@ export default function App() {
       const prevState = appStateRef.current;
       appStateRef.current = nextAppState;
 
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
+      if (nextAppState === 'background') {
         if (!backgroundedAtRef.current) {
           backgroundedAtRef.current = Date.now();
         }
         if (backgroundTimerRef.current) {
           clearTimeout(backgroundTimerRef.current);
         }
-        // Verrouiller la session si l'utilisateur quitte l'application un moment
+        // Verrouiller la session uniquement si l'utilisateur quitte réellement l'application (background)
+        // Sur iOS, 'inactive' survient lors des alertes système, appels ou partage PDF
         backgroundTimerRef.current = setTimeout(() => {
-          if (appStateRef.current !== 'active' && !isAutoLockSuppressed()) {
+          if (appStateRef.current === 'background' && !isAutoLockSuppressed()) {
             lockUserSession('background');
           }
         }, BACKGROUND_LOCK_DELAY_MS);
-      } else if (
-        (prevState === 'background' || prevState === 'inactive') &&
-        nextAppState === 'active'
-      ) {
+      } else if (prevState === 'background' && nextAppState === 'active') {
         if (backgroundTimerRef.current) {
           clearTimeout(backgroundTimerRef.current);
           backgroundTimerRef.current = null;
@@ -133,10 +132,11 @@ export default function App() {
   }, [navigationRef, redirectToLogin, resetInactivityTimer]);
 
   return (
-    <View
-      style={{ flex: 1 }}
-      onTouchStart={resetInactivityTimer}
-    >
+    <SafeAreaProvider>
+      <View
+        style={{ flex: 1 }}
+        onTouchStart={resetInactivityTimer}
+      >
       <NavigationContainer
         ref={navigationRef}
         onStateChange={handleNavigationStateChange}
@@ -169,5 +169,6 @@ export default function App() {
         </Stack.Navigator>
       </NavigationContainer>
     </View>
+    </SafeAreaProvider>
   );
 }

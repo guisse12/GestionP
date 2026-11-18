@@ -13,7 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import NavigationLayout from '../components/NavigationLayout';
 import { COLORS, SHADOWS, formatFCFA, formatNumber } from '../theme/colors';
-import { getCachedUser, getCurrentUser } from '../services/authService';
+import { getCachedUser, getCurrentUser, suppressAutoLock } from '../services/authService';
 import {
   getCachedSummary,
   loadFarmWorkbook,
@@ -59,6 +59,21 @@ export default function ClientHomeScreen({ navigation }) {
 
   const adjustQty = (delta) => {
     setQuantite((prev) => Math.max(1, (Number(prev) || 0) + delta));
+  };
+
+  const handleCallManager = async () => {
+    const url = 'tel:+221777527561';
+    try {
+      suppressAutoLock(60000);
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Appel Gérant', 'Numéro du Gérant (COLY) : +221 77 752 75 61');
+      }
+    } catch (e) {
+      Alert.alert('Appel Gérant', 'Numéro du Gérant (COLY) : +221 77 752 75 61');
+    }
   };
 
   const handleOrderSubmit = async () => {
@@ -114,7 +129,7 @@ export default function ClientHomeScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.callManagerCard}
-          onPress={() => Linking.openURL('tel:+221777527561')}
+          onPress={handleCallManager}
           activeOpacity={0.85}
         >
           <View style={styles.callIconBox}>

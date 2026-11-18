@@ -11,15 +11,17 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  SafeAreaView,
   StatusBar,
   Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../theme/colors';
 import { registerWithPhoneAndPassword } from '../services/authService';
 
 export default function RegisterScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const topInset = Platform.OS === 'ios' ? insets.top : StatusBar.currentHeight || 0;
   const [nom, setNom] = useState('');
   const [telephone, setTelephone] = useState('');
   const [password, setPassword] = useState('');
@@ -78,7 +80,7 @@ export default function RegisterScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.primaryDark} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -88,13 +90,16 @@ export default function RegisterScreen({ navigation }) {
           ref={scrollRef}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: keyboardHeight > 0 ? 100 : 36 },
+            { paddingBottom: keyboardHeight > 0 ? 100 : Math.max(36, insets.bottom + 20) },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <View style={[styles.header, { paddingTop: topInset + 16 }]}>
+            <TouchableOpacity
+              style={[styles.backBtn, { top: topInset + 14 }]}
+              onPress={() => navigation.goBack()}
+            >
               <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
             </TouchableOpacity>
             <Image source={require('../../assets/logo.png')} style={styles.logo} />
@@ -240,7 +245,7 @@ export default function RegisterScreen({ navigation }) {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 

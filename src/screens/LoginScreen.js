@@ -11,12 +11,12 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  SafeAreaView,
   StatusBar,
   Animated,
   Easing,
   Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../theme/colors';
 import {
@@ -51,6 +51,7 @@ const TRAY_SLOTS_RIGHT = [
 const ALL_FALLING_EGGS = [...TRAY_SLOTS_LEFT, ...TRAY_SLOTS_RIGHT];
 
 export default function LoginScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [telephone, setTelephone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -244,7 +245,7 @@ export default function LoginScreen({ navigation }) {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.primaryDark} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -254,12 +255,17 @@ export default function LoginScreen({ navigation }) {
           ref={scrollRef}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: keyboardHeight > 0 ? 90 : 36 },
+            { paddingBottom: keyboardHeight > 0 ? 90 : Math.max(36, insets.bottom + 20) },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.heroBanner}>
+          <View
+            style={[
+              styles.heroBanner,
+              { paddingTop: (Platform.OS === 'ios' ? insets.top : StatusBar.currentHeight || 0) + 18 },
+            ]}
+          >
             {/* Scène d'en-tête : Tablette Gauche + Logo Officiel 100% Fixe + Tablette Droite */}
             <View style={styles.headerStageRow}>
               {/* Tablette d'œufs Gauche (6 œufs qui tombent dans les alvéoles) */}
@@ -362,7 +368,7 @@ export default function LoginScreen({ navigation }) {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 

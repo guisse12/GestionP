@@ -16,7 +16,18 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "sn.gestionp.app"
+      "bundleIdentifier": "sn.gestionp.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": [
+          "tel",
+          "mailto"
+        ],
+        "NSCameraUsageDescription": "Cette application utilise la caméra pour prendre des photos si nécessaire.",
+        "NSPhotoLibraryUsageDescription": "Cette application accède à vos photos pour l'envoi ou la gestion d'images.",
+        "NSLocationWhenInUseUsageDescription": "Cette application utilise votre position pour faciliter la livraison."
+      }
     },
     "android": {
       "package": "sn.gestionp.app",

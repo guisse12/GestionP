@@ -6,11 +6,12 @@ import {
   ScrollView,
   TouchableOpacity,
   Linking,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import NavigationLayout from '../components/NavigationLayout';
 import { COLORS, SHADOWS, formatFCFA } from '../theme/colors';
-import { getCachedUser, getCurrentUser } from '../services/authService';
+import { getCachedUser, getCurrentUser, suppressAutoLock } from '../services/authService';
 import { getCachedWorkbook, loadFarmWorkbook, deleteClientOrder } from '../services/farmDataService';
 
 export default function ClientOrdersScreen({ navigation }) {
@@ -68,6 +69,21 @@ export default function ClientOrdersScreen({ navigation }) {
     };
   };
 
+  const handleCallManager = async () => {
+    const url = 'tel:+221777527561';
+    try {
+      suppressAutoLock(60000);
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Appel Gérant', 'Numéro du Gérant (COLY) : +221 77 752 75 61');
+      }
+    } catch (e) {
+      Alert.alert('Appel Gérant', 'Numéro du Gérant (COLY) : +221 77 752 75 61');
+    }
+  };
+
   return (
     <NavigationLayout
       user={user}
@@ -79,7 +95,7 @@ export default function ClientOrdersScreen({ navigation }) {
         {/* Bannière d'appel direct du gérant */}
         <TouchableOpacity
           style={styles.callManagerBanner}
-          onPress={() => Linking.openURL('tel:+221777527561')}
+          onPress={handleCallManager}
           activeOpacity={0.85}
         >
           <View style={styles.callIconBox}>

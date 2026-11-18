@@ -9,12 +9,12 @@ import {
   Animated,
   Dimensions,
   ScrollView,
-  SafeAreaView,
   Platform,
   StatusBar,
   KeyboardAvoidingView,
   Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../theme/colors';
 import { logoutUser, getCachedUser } from '../services/authService';
@@ -63,6 +63,9 @@ export default function NavigationLayout({
   pendingOrdersCount = 0,
 }) {
   const user = propUser || getCachedUser();
+  const insets = useSafeAreaInsets();
+  const topInset = Platform.OS === 'ios' ? insets.top : StatusBar.currentHeight || 0;
+  const bottomInset = Platform.OS === 'ios' ? insets.bottom : 0;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
@@ -221,11 +224,11 @@ export default function NavigationLayout({
       ];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.primaryDark} />
 
       {/* NAVBAR FIXE EN HAUT */}
-      <View style={styles.topNavbar}>
+      <View style={[styles.topNavbar, { height: 60 + topInset, paddingTop: topInset }]}>
         <TouchableOpacity style={styles.menuButton} onPress={openDrawer} activeOpacity={0.75}>
           <Ionicons name="menu" size={26} color="#FFFFFF" />
           {isAdmin && pendingUsersCount + pendingOrdersCount > 0 && (
@@ -264,7 +267,12 @@ export default function NavigationLayout({
 
       {/* NAVBAR FIXE EN BAS (Masquée automatiquement quand le clavier est ouvert pour libérer l'écran) */}
       {keyboardHeight === 0 && (
-        <View style={styles.bottomNavbar}>
+        <View
+          style={[
+            styles.bottomNavbar,
+            { height: 64 + bottomInset, paddingBottom: bottomInset },
+          ]}
+        >
           {bottomTabs.map((tab) => {
             const isActive = activeTab === tab.key;
             return (
@@ -387,7 +395,7 @@ export default function NavigationLayout({
           </Animated.View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -395,7 +403,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0,
   },
   topNavbar: {
     height: 60,
